@@ -24,5 +24,5 @@ COPY . .
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Expose port and configure start command
-EXPOSE $PORT
-CMD gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000}
+EXPOSE ${PORT:-5000}
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000}"]
