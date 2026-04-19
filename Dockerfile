@@ -1,6 +1,11 @@
 # Stage 1: Build the React frontend
 FROM node:20 AS frontend-builder
 WORKDIR /app
+
+# Enable Railway to inject the Clerk publishable key during Vite build
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+
 COPY frontend/package*.json ./frontend/
 RUN cd frontend && npm install
 COPY frontend/ ./frontend/
