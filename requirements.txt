@@ -10,3 +10,4 @@ clerk-backend-api>=5.0.0
 PyJWT>=2.8.0
 stripe>=15.0.0
 pytest>=7.4.0
+gunicorn
