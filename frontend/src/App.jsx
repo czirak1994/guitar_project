@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
+import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import './App.css'
 
 // ── Web Audio Metronome ───────────────────────────────────────────────────────
@@ -513,6 +514,7 @@ function ResultsPanel({ results }) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const { getToken } = useAuth()
   const [bpm, setBpm]               = useState(120)
   const [duration, setDuration]     = useState(30)
   const [latencyMs, setLatencyMs]   = useState(0)
@@ -528,10 +530,6 @@ export default function App() {
   
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
-
-
-
-  const inFlightRef = useRef(false)
 
   const handleRecord = async () => {
     if (phase === 'recording') {
@@ -606,10 +604,17 @@ export default function App() {
             formData.append('latency_ms', latencyMs)
             
             try {
-                const { data } = await axios.post('/api/analyze', formData)
+                const jwt = await getToken()
+                const { data } = await axios.post('/api/analyze', formData, {
+                  headers: { Authorization: `Bearer ${jwt}` }
+                })
                 setResults(data)
                 setPhase('done')
             } catch(e) {
+                if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
+                  setPhase('paywall')
+                  return
+                }
                 setError(e.response?.data?.error || e.message)
                 setPhase('idle')
             } finally {
@@ -629,8 +634,26 @@ export default function App() {
   const pct = clamp((elapsed / duration) * 100, 0, 100)
 
   return (
-    <div className="app">
-      <div className="container">
+    <>
+      <SignedOut>
+        <div style={{ textAlign: 'center', marginTop: '100px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ fontSize: '48px', marginBottom: '20px' }}>🎸</div>
+          <h1>AI Guitar Coach</h1>
+          <p style={{ color: '#ccc', maxWidth: '400px', marginBottom: '30px', lineHeight: '1.6' }}>
+            Record your playing and get instant, professional feedback powered by advanced DSP and AI analysis.
+          </p>
+          <SignInButton mode="modal">
+            <button className="btn record-btn" style={{ fontSize: '18px', padding: '12px 32px', cursor: 'pointer' }}>Sign In to Start</button>
+          </SignInButton>
+        </div>
+      </SignedOut>
+      
+      <SignedIn>
+      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 100 }}>
+        <UserButton />
+      </div>
+      <div className="app">
+        <div className="container">
 
         {/* ── Header ── */}
         <header className="header">
@@ -746,6 +769,37 @@ export default function App() {
         <ResultsPanel results={results} />
 
       </div>
+
+      {phase === 'paywall' && (
+         <div className="modal" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}}>
+            <div style={{ background: '#222', padding: '40px', borderRadius: '12px', textAlign: 'center', border: '1px solid #444', maxWidth: '400px' }}>
+               <h2 style={{ color: '#ffb300', marginBottom: '16px' }}>Limit Reached</h2>
+               <p style={{ color: '#ccc', margin: '0 0 24px', lineHeight: '1.5' }}>
+                 You've used your 5 free analyses for today. Upgrade to Pro for unlimited coaching!
+               </p>
+               <button className="btn record-btn" style={{ padding: '12px 24px', cursor: 'pointer' }} onClick={async () => {
+                   try {
+                     const jwt = await getToken();
+                     const { data } = await axios.post('/api/create-checkout-session', {}, {
+                       headers: { Authorization: `Bearer ${jwt}` }
+                     });
+                     window.location.href = data.url;
+                   } catch(err) {
+                     setError("Billing system unavailable.");
+                     setPhase('idle');
+                   }
+               }}>Upgrade to Pro</button>
+               <div style={{ marginTop: '16px' }}>
+                   <button onClick={() => setPhase('idle')} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', padding: '8px' }}>
+                     Cancel
+                   </button>
+               </div>
+            </div>
+         </div>
+      )}
+
     </div>
+    </SignedIn>
+    </>
   )
 }
