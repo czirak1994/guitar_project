@@ -1,0 +1,28 @@
+# Stage 1: Build the React frontend
+FROM node:20 AS frontend-builder
+WORKDIR /app
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm install
+COPY frontend/ ./frontend/
+RUN cd frontend && npm run build
+
+# Stage 2: Build the Python backend
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install system dependencies needed for audio processing
+RUN apt-get update && apt-get install -y libsndfile1 && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy all backend source code
+COPY . .
+
+# Copy the built frontend static files from Stage 1
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+
+# Expose port and configure start command
+EXPOSE $PORT
+CMD gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000}

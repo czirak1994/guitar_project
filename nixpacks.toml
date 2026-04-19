@@ -1,9 +1,0 @@
-[phases.setup]
-nixPkgs = ["python311", "nodejs_20", "libsndfile"]
-
-[phases.build_frontend]
-dependsOn = ["install"]
-cmds = [
-    "cd frontend && npm install",
-    "cd frontend && npm run build"
-]

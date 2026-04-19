@@ -1,9 +1,0 @@
-{
-  "name": "guitar-coach",
-  "version": "1.0.0",
-  "description": "Root package to build React frontend on Railway",
-  "scripts": {
-    "install": "cd frontend && npm install",
-    "build": "cd frontend && npm run build"
-  }
-}
