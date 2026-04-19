@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Guitar Coach</title>
+    <meta name="description" content="Real-time guitar analysis with pitch detection, timing feedback, and coaching" />
+    <link rel="stylesheet" href="style.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">🎸</div>
+                <h1>AI Guitar Coach</h1>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls Bar -->
+        <section class="controls-bar">
+            <div class="control-group">
+                <label for="deviceSelect">Audio Device</label>
+                <select id="deviceSelect">
+                    <option value="">Loading devices...</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="bpmInput">BPM</label>
+                <input type="number" id="bpmInput" value="120" min="30" max="300" step="1" />
+            </div>
+            <div class="control-group control-buttons">
+                <button id="startBtn" class="btn btn-start">▶ Start</button>
+                <button id="stopBtn" class="btn btn-stop" disabled>■ Stop</button>
+            </div>
+        </section>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard">
+            <!-- Current Note Display -->
+            <section class="card card-note" id="noteCard">
+                <div class="card-header">Current Note</div>
+                <div class="note-display">
+                    <span class="note-name" id="currentNote">—</span>
+                    <span class="note-cents" id="currentCents"></span>
+                </div>
+                <div class="note-freq" id="currentFreq">— Hz</div>
+                <div class="note-confidence">
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidenceFill"></div>
+                    </div>
+                    <span id="confidenceText">0%</span>
+                </div>
+            </section>
+
+            <!-- Level Meter -->
+            <section class="card card-level">
+                <div class="card-header">Signal Level</div>
+                <div class="level-meter">
+                    <div class="level-bar-container">
+                        <div class="level-fill" id="levelFill"></div>
+                    </div>
+                    <span class="level-db" id="levelDb">-∞ dB</span>
+                </div>
+            </section>
+
+            <!-- Timing Display -->
+            <section class="card card-timing">
+                <div class="card-header">Timing</div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-value" id="timingDeviation">—</div>
+                        <div class="metric-label">Avg Deviation</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="timingConsistency">—</div>
+                        <div class="metric-label">Consistency</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="onTimeRatio">—</div>
+                        <div class="metric-label">On Time</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Accuracy Display -->
+            <section class="card card-accuracy">
+                <div class="card-header">Accuracy</div>
+                <div class="accuracy-ring-container">
+                    <svg class="accuracy-ring" viewBox="0 0 120 120">
+                        <circle class="ring-bg" cx="60" cy="60" r="52" />
+                        <circle class="ring-fill" id="accuracyRing" cx="60" cy="60" r="52" />
+                    </svg>
+                    <div class="accuracy-text" id="accuracyText">—</div>
+                </div>
+            </section>
+
+            <!-- Note History -->
+            <section class="card card-history">
+                <div class="card-header">Note History</div>
+                <div class="note-history" id="noteHistory">
+                    <div class="history-placeholder">Play some notes to see history...</div>
+                </div>
+            </section>
+
+            <!-- Feedback Panel -->
+            <section class="card card-feedback">
+                <div class="card-header">💬 Feedback</div>
+                <div class="feedback-messages" id="feedbackMessages">
+                    <div class="feedback-placeholder">
+                        Start playing to receive feedback...
+                    </div>
+                </div>
+            </section>
+
+            <!-- Errors Panel -->
+            <section class="card card-errors">
+                <div class="card-header">⚠ Issues</div>
+                <div class="error-list" id="errorList">
+                    <div class="error-placeholder">No issues detected</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
