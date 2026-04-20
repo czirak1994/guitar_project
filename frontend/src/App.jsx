@@ -386,6 +386,87 @@ function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef }) {
   )
 }
 
+function PaywallModal({ isOpen, onContinueFree, getToken }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  if (!isOpen) return null
+
+  const handleUpgrade = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const jwt = await getToken()
+      const { data } = await axios.post(
+        '/api/create-checkout-session',
+        {},
+        { headers: { Authorization: `Bearer ${jwt}` } }
+      )
+      window.location.href = data.url
+    } catch (err) {
+      setError('Unable to start checkout. Please try again.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h2>Analysis Limit Reached</h2>
+        <p>
+          You've used all your free analyses for today. Upgrade to PRO for
+          unlimited AI coaching sessions, priority processing, and advanced
+          performance insights.
+        </p>
+        {error && (
+          <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: '12px' }}>
+            {error}
+          </div>
+        )}
+        <button
+          className="btn"
+          style={{
+            borderColor: 'var(--yellow)',
+            color: 'var(--yellow)',
+            width: '100%',
+            marginBottom: '12px',
+            padding: '12px',
+            fontSize: '1rem',
+            opacity: loading ? 0.6 : 1,
+          }}
+          onClick={handleUpgrade}
+          disabled={loading}
+        >
+          {loading ? (
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <span style={{
+                display: 'inline-block',
+                width: 14,
+                height: 14,
+                border: '2px solid var(--yellow)',
+                borderTopColor: 'transparent',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              Redirecting to Checkout…
+            </span>
+          ) : (
+            'Upgrade to PRO'
+          )}
+        </button>
+        <button
+          className="btn"
+          style={{ width: '100%', opacity: 0.7 }}
+          onClick={onContinueFree}
+          disabled={loading}
+        >
+          Continue Free
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function OnboardingModal({ isOpen, onSubmit }) {
   const [skill, setSkill] = useState('beginner')
   const [goal, setGoal] = useState('timing')
@@ -819,25 +900,11 @@ export default function App() {
             </div>
           </div>
           
-          {phase === 'paywall' && (
-            <div className="modal-overlay">
-              <div className="modal-content">
-                <h2>Analysis Limit Reached</h2>
-                <p>You have reached the free limit of 5 analyses per day. Upgrade to a Pro account for unlimited coaching.</p>
-                <button className="btn" style={{borderColor: 'var(--yellow)', color: 'var(--yellow)', width: '100%', marginBottom: '12px'}} onClick={async () => {
-                    try {
-                      const jwt = await getToken();
-                      const { data } = await axios.post('/api/create-checkout-session', {}, { headers: { Authorization: `Bearer ${jwt}` } });
-                      window.location.href = data.url;
-                    } catch(err) {
-                      alert("Billing system unavailable.");
-                      setPhase('idle');
-                    }
-                }}>Upgrade to Pro</button>
-                <button className="btn" style={{width: '100%', opacity: 0.7}} onClick={() => setPhase('idle')}>Dismiss</button>
-              </div>
-            </div>
-          )}
+          <PaywallModal
+            isOpen={phase === 'paywall'}
+            onContinueFree={() => setPhase('idle')}
+            getToken={getToken}
+          />
 
         </div>
       </SignedIn>
