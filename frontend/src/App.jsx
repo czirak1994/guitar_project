@@ -341,7 +341,7 @@ function OnboardingModal({ isOpen, onSubmit }) {
   return (
     <div className="modal-overlay">
       <div className="modal-content onboarding-content">
-        <h2>Welcome to Guitar Coach Pro</h2>
+        <h2>Welcome to ToneSense</h2>
         <p>Let's personalize your learning plan to build a daily habit.</p>
         
         <div className="field">
@@ -563,7 +563,7 @@ export default function App() {
     <>
       <SignedOut>
         <div className="auth-overlay">
-          <h1>Guitar Coach Pro</h1>
+          <h1>ToneSense</h1>
           <p>Login to access the AI analysis engine, precision metronome, and tuner.</p>
           <SignInButton mode="modal">
             <button className="btn" style={{padding: '12px 32px', fontSize: '1rem'}}>Access Platform</button>
@@ -599,7 +599,7 @@ export default function App() {
 
           {/* Header */}
           <header className="app-header">
-            <div className="app-title">Guitar Coach Pro</div>
+            <div className="app-title">ToneSense</div>
             <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
           </header>
 
@@ -674,22 +674,29 @@ export default function App() {
                        
                        {item.ai_advice && typeof item.ai_advice === 'object' && (
                           <div className="ai-feedback-box">
-                             <div className="ai-feedback-header">Progress Check</div>
+                             <div className="ai-feedback-header">Performance Review</div>
                              <div className="ai-summary">{item.ai_advice.summary}</div>
                              
-                             <div className="ai-details-grid">
-                                <div className="ai-col issue">
-                                   <strong>Problem:</strong> {item.ai_advice.problem}
+                             <div className="ai-details-grid tonesense-badges" style={{display: 'flex', gap: '8px', flexDirection: 'row'}}>
+                                <div className="tonesense-badge" style={{flex: 1, background: 'var(--bg-deep)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '0.8rem'}}>
+                                   <strong style={{color: 'var(--blue)'}}>Key/Scale:</strong><br/>{item.ai_advice.detected_scale || 'N/A'}
                                 </div>
+                                <div className="tonesense-badge" style={{flex: 1, background: 'var(--bg-deep)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '0.8rem'}}>
+                                   <strong style={{color: 'var(--yellow)'}}>Rhythm:</strong><br/>{item.ai_advice.detected_rhythm || 'N/A'}
+                                </div>
+                             </div>
+
+                             <div className="ai-details-grid">
                                 <div className="ai-col fix">
-                                   <strong>To Fix:</strong>
-                                   <ul>
-                                     {Array.isArray(item.ai_advice.fix) ? item.ai_advice.fix.map((f, i) => <li key={i}>{f}</li>) : <li>{item.ai_advice.fix}</li>}
-                                   </ul>
+                                   <strong>🎼 Musical Insight:</strong>
+                                   <div style={{marginTop: 4, lineHeight: 1.5, color: 'var(--text-1)'}}>{item.ai_advice.musical_advice || item.ai_advice.problem}</div>
+                                </div>
+                                <div className="ai-col issue" style={{marginTop: 8}}>
+                                   <strong>⚙️ Technical Focus:</strong>
+                                   <div style={{marginTop: 4, color: 'var(--red)'}}>{item.ai_advice.technical_focus || item.ai_advice.cause}</div>
                                 </div>
                              </div>
                              
-                             <div className="ai-encouragement">{item.ai_advice.encouragement}</div>
                           </div>
                        )}
 

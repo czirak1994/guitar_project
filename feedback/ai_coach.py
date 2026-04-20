@@ -11,25 +11,22 @@ class AICoach:
     Gracefully degrades if the API key is missing or the call fails.
     """
 
-    SYSTEM_PROMPT = """You are a professional guitar teacher and audio engineer.
+    SYSTEM_PROMPT = """You are a professional musical guitar coach (ToneSense AI).
 
-You are analyzing a student's guitar performance using:
-1. Raw audio recording
-2. DSP metrics (timing, pitch, dynamics)
-3. Previous session data (to track progress)
+You are analyzing a student's guitar performance by listening to their raw audio recording and reviewing DSP metrics.
 
-Your job is to give precise, technical, and actionable feedback in JSON format.
+Your job is to give highly constructive, musical, and technical feedback in JSON format.
 
 Rules:
-* Do NOT give generic advice. Do NOT give textual vomit.
-* Follow the JSON structure strictly.
-* Speak like a real coach, but extremely concise.
-* Use concrete observations from the data (e.g. "Your timing improved by 10ms").
+* You MUST carefully analyze the provided WAV audio file to detect the underlying Scale/Key and Rhythm.
+* Speak like a real, encouraging music mentor.
+* Be conversational in the 'musical_advice' field, focusing on phrasing, dynamics, and feel.
+* Keep 'technical_focus' strictly limited to fixing the primary mechanical error based on DSP metrics.
 
 USER CONTEXT:
 * Skill Level: {skill_level}
 * Goal: {goal}
-* Language: {language} (You MUST write the JSON string values in this language!)
+* Language: {language} (You MUST write all generated text in this language!)
 
 DSP DATA:
 * Tempo: {bpm}
@@ -39,19 +36,16 @@ DSP DATA:
 * Detected issues: {issues_list}
 
 PREVIOUS SESSION:
-* Previous Timing deviation: {last_timing_ms} ms avg
-* Previous Pitch accuracy: {last_pitch_accuracy}%
+* Previous Timing: {last_timing_ms} ms
+* Previous Accuracy: {last_pitch_accuracy}%
 
-Output exact JSON strictly conforming to this schema (no markdown formatting around it!):
+Output exact JSON strictly conforming to this schema:
 {{
-  "summary": "1 sentence summarizing progress (e.g., 'You improved your timing consistency, but are still rushing on the downbeat.')",
-  "problem": "1 main problem (max 10 words)",
-  "cause": "1 main cause of the problem (max 10 words)",
-  "fix": [
-     "Step 1 to fix the problem",
-     "Step 2 (optional)"
-  ],
-  "encouragement": "Short 1 sentence encouragement."
+  "summary": "2-3 conversational sentences summarizing the overall feel and progress.",
+  "detected_scale": "The likely scale/key they played (e.g. 'A Minor Pentatonic', 'C Major'). If unsure, guess the closest.",
+  "detected_rhythm": "The primary rhythm pattern used (e.g. 'Straight 8th notes', 'Syncopated Triplets').",
+  "musical_advice": "A conversational paragraph with ideas on phrasing, dynamics, or musicality to make it sound better.",
+  "technical_focus": "The #1 DSP metric to fix (e.g., 'Timing was late by 30ms. Play on top of the beat')."
 }}
 """
 
@@ -124,7 +118,15 @@ Output exact JSON strictly conforming to this schema (no markdown formatting aro
                 pass
 
             if response.text:
-                return json.loads(response.text.strip())
+                text = response.text.strip()
+                if text.startswith('```json'): text = text[7:]
+                if text.startswith('```'): text = text[3:]
+                if text.endswith('```'): text = text[:-3]
+                try:
+                    return json.loads(text.strip())
+                except Exception as parse_e:
+                    print(f"[AICoach] JSON Parse Error. Raw text:\n{text}\nError: {parse_e}")
+                    raise parse_e
             return self._fallback(feedback_report_dict)
 
         except Exception as e:
@@ -140,12 +142,12 @@ Output exact JSON strictly conforming to this schema (no markdown formatting aro
                  tips.append(msg)
 
         if not tips:
-            tips.append("Practice to a metronome.")
+            tips.append("Focus on improving your timing with a metronome.")
             
         return {
-            "summary": "Keep practicing! Consistency is key.",
-            "problem": "Timing variations.",
-            "cause": "Lack of synchronization.",
-            "fix": tips,
-            "encouragement": "You'll get there!"
+            "summary": "Great effort! The AI audio analysis timed out, but the basic engine detected some variations.",
+            "detected_scale": "Unknown (Offline)",
+            "detected_rhythm": "Unknown (Offline)",
+            "musical_advice": "Try to focus on consistent dynamics and a flowing rhythm.",
+            "technical_focus": tips[0] if tips else "Keep practicing with the metronome."
         }

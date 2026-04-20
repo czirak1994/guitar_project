@@ -29,8 +29,13 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
     app = Flask(__name__, static_folder=static_dir, static_url_path="/")
     CORS(app)  # allow Vite dev server (localhost:5173)
 
-    # Initialize SQLite Database
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+    # Initialize Database (PostgreSQL if DATABASE_URL, else SQLite)
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url.replace("postgres://", "postgresql://", 1)  # SQLAlchemy 1.4+ fix
+    else:
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+        
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app)
     

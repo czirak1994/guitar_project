@@ -4,36 +4,38 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg-deep:      #111111;
-  --bg-panel:     #1a1a1a;
-  --bg-panel-hi:  #242424;
-  --bg-input:     #121212;
-  --border:       #2d2d2d;
-  --border-hi:    #3e3e3e;
+  --bg-deep:      #090912;
+  --bg-panel:     rgba(23, 20, 38, 0.65);
+  --bg-panel-hi:  rgba(36, 31, 61, 0.85);
+  --bg-input:     rgba(13, 11, 23, 0.9);
+  --border:       rgba(95, 84, 150, 0.25);
+  --border-hi:    rgba(114, 102, 180, 0.4);
   
-  --accent:       #00e5a0;
-  --accent-dim:   #00b87c;
-  --accent-bg:    rgba(0, 229, 160, 0.15);
+  --accent:       #00E5FF;
+  --accent-dim:   #00BACF;
+  --accent-bg:    rgba(0, 229, 255, 0.15);
   
-  --red:          #ff4c4c;
-  --yellow:       #ffc107;
-  --blue:         #3b99fc;
+  --red:          #FF2A5F;
+  --yellow:       #FFD166;
+  --blue:         #7B61FF;
   
-  --text-1:       #f0f0f0;
-  --text-2:       #a0a0a0;
-  --text-3:       #666666;
+  --text-1:       #F8FAFC;
+  --text-2:       #C4B5FD;
+  --text-3:       #8B5CF6;
   
-  --radius-sm:    4px;
-  --radius:       6px;
+  --radius-sm:    8px;
+  --radius:       16px;
 }
 
 html, body, #root {
   height: 100vh;
   width: 100vw;
-  background: var(--bg-deep);
+  background: radial-gradient(circle at 10% 40%, rgba(123, 97, 255, 0.15), transparent 45%),
+              radial-gradient(circle at 90% 70%, rgba(0, 229, 255, 0.12), transparent 45%),
+              var(--bg-deep);
   color: var(--text-1);
   font-family: 'Inter', -apple-system, sans-serif;
-  overflow: hidden; /* Fix layout to viewport */
+  overflow: hidden;
 }
 
 /* ── Core Layout ────────────────────────────────────── */
@@ -53,16 +55,27 @@ html, body, #root {
 .auth-overlay p { color: var(--text-2); margin-bottom: 24px; text-align: center; max-width: 400px; }
 
 .app-header {
-  height: 48px;
+  height: 56px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 24px;
   flex-shrink: 0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  z-index: 10;
 }
-.app-title { font-size: 0.85rem; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 1px; }
+.app-title { 
+  font-size: 1.1rem; 
+  font-weight: 800; 
+  background: linear-gradient(to right, var(--accent), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.5px;
+}
 
 /* Desktop split screen */
 .workspace {
@@ -79,6 +92,8 @@ html, body, #root {
   max-width: 600px;
   border-right: 1px solid var(--border);
   background: var(--bg-panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -87,7 +102,7 @@ html, body, #root {
 /* Right side */
 .session-panel {
   flex: 1;
-  background: var(--bg-deep);
+  background: rgba(0,0,0,0.1);
   display: flex;
   flex-direction: column;
 }
