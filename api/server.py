@@ -219,7 +219,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                         except Exception:
                             pass
 
-            app_clone = app._get_current_object()
+            app_clone = app
             t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
             t.start()
 
