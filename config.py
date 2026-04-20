@@ -53,7 +53,7 @@ class AIConfig:
     """Optional AI coaching layer."""
     enabled: bool = os.getenv("GEMINI_API_KEY") is not None
     api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
-    model: str = "gemini-1.5-flash"
+    model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     max_tokens: int = 300
 
 
