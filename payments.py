@@ -21,6 +21,14 @@ def create_checkout_session():
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
 
+    price_id = os.getenv("STRIPE_PRO_PRICE_ID", "price_12345")
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    secret_key = os.getenv("STRIPE_SECRET_KEY", "")
+    print(f"[Stripe] create_checkout_session called for user_id={user_id}")
+    print(f"[Stripe] STRIPE_SECRET_KEY prefix={secret_key[:10] if secret_key else 'NOT SET'}")
+    print(f"[Stripe] STRIPE_PRO_PRICE_ID={price_id}")
+    print(f"[Stripe] FRONTEND_URL={frontend_url}")
+
     try:
         # Create a new Checkout Session for the PRO plan
         checkout_session = stripe.checkout.Session.create(
@@ -28,19 +36,20 @@ def create_checkout_session():
             line_items=[
                 {
                     # Provide the exact Price ID (e.g. pr_1234) of the product you have created
-                    'price': os.getenv("STRIPE_PRO_PRICE_ID", "price_12345"),
+                    'price': price_id,
                     'quantity': 1,
                 },
             ],
             mode='subscription',
-            success_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/?success=true",
-            cancel_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/?canceled=true",
+            success_url=frontend_url + "/?success=true",
+            cancel_url=frontend_url + "/?canceled=true",
             metadata={
                 "user_id": user_id
             }
         )
         return jsonify({"url": checkout_session.url})
     except Exception as e:
+        print(f"[Stripe Error] {type(e).__name__}: {e}")
         return jsonify(error=str(e)), 500
 
 
