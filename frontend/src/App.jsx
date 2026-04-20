@@ -369,11 +369,12 @@ export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const [bpm, setBpm] = useState(120)
   
-  const [phase, setPhase] = useState('idle') // idle | countdown | recording | analyzing | paywall
+  const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | analyzing | paywall
   const [countdown, setCountdown] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [sessionHistory, setSessionHistory] = useState([])
   const [profile, setProfile] = useState(null)
+  const [pendingAudio, setPendingAudio] = useState(null)
   
   const [tunerActive, setTunerActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
@@ -471,7 +472,6 @@ export default function App() {
         stop: async () => {
             if (!recordingRef.current.active) return
             recordingRef.current.active = false
-            setPhase('analyzing')
             
             processor.disconnect()
             source.disconnect()
@@ -486,41 +486,57 @@ export default function App() {
             }
             
             const wavBlob = encodeWAV(allSamples, audioCtx.sampleRate)
-            const formData = new FormData()
-            formData.append('file', wavBlob, 'recording.wav')
-            formData.append('bpm', bpm)
+            const wavUrl = URL.createObjectURL(wavBlob)
             
-            try {
-                const jwt = await getToken()
-                const { data } = await axios.post('/api/analyze', formData, {
-                  headers: { Authorization: `Bearer ${jwt}` }
-                })
-                
-                // Update profile from response (streak, focus)
-                if (data.streak_days !== undefined) {
-                   setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
-                }
-
-                // Append to history
-                setSessionHistory(prev => [...prev, {
-                  id: Date.now(),
-                  time: new Date().toLocaleTimeString(),
-                  ...data
-                }])
-                setPhase('idle')
-            } catch(e) {
-                if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
-                  setPhase('paywall')
-                  return
-                }
-                alert(e.response?.data?.error || e.message)
-                setPhase('idle')
-            } finally {
-                inFlightRef.current = false
-                audioCtx.close().catch(()=>{})
-            }
+            setPendingAudio({ blob: wavBlob, url: wavUrl })
+            setPhase('review')
+            inFlightRef.current = false
+            audioCtx.close().catch(()=>{})
         }
       }
+  }
+
+  const handleAnalyzeTake = async () => {
+    if (!pendingAudio) return
+    setPhase('analyzing')
+    inFlightRef.current = true
+    
+    const formData = new FormData()
+    formData.append('file', pendingAudio.blob, 'recording.wav')
+    formData.append('bpm', bpm)
+    
+    try {
+        const jwt = await getToken()
+        const { data } = await axios.post('/api/analyze', formData, {
+          headers: { Authorization: `Bearer ${jwt}` }
+        })
+        
+        if (data.streak_days !== undefined) {
+           setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
+        }
+        setSessionHistory(prev => [...prev, {
+          id: Date.now(),
+          time: new Date().toLocaleTimeString(),
+          ...data
+        }])
+        setPhase('idle')
+        setPendingAudio(null)
+    } catch(e) {
+        if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
+          setPhase('paywall')
+        } else {
+          alert(e.response?.data?.error || e.message)
+          setPhase('idle')
+        }
+    } finally {
+        inFlightRef.current = false
+    }
+  }
+
+  const handleDiscardTake = () => {
+     if (pendingAudio?.url) URL.revokeObjectURL(pendingAudio.url)
+     setPendingAudio(null)
+     setPhase('idle')
   }
 
   const latestResult = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null
@@ -547,6 +563,20 @@ export default function App() {
              <div className="countdown-overlay">
                 <div className="countdown-number">{countdown}</div>
                 <div className="countdown-text">Get Ready...</div>
+             </div>
+          )}
+
+          {/* Review Take Overlay */}
+          {phase === 'review' && pendingAudio && (
+             <div className="countdown-overlay">
+                <div style={{ background: 'var(--bg-panel)', padding: '24px', borderRadius: '8px', textAlign: 'center' }}>
+                   <h2 style={{ marginBottom: '16px', color: 'var(--text-1)', fontWeight: '500' }}>Review Recording</h2>
+                   <audio src={pendingAudio.url} controls style={{ marginBottom: '24px', display: 'block', outline: 'none' }} />
+                   <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                      <button className="btn" style={{ borderColor: 'var(--text-3)', color: 'var(--text-2)' }} onClick={handleDiscardTake}>Discard</button>
+                      <button className="btn" style={{ background: 'var(--accent-dim)', color: '#000', fontWeight: 600, border: 'none' }} onClick={handleAnalyzeTake}>Upload & Analyze</button>
+                   </div>
+                </div>
              </div>
           )}
 
