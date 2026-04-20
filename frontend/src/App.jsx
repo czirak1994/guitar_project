@@ -328,6 +328,7 @@ function LatestStatsWidget({ result }) {
 function OnboardingModal({ isOpen, onSubmit }) {
   const [skill, setSkill] = useState('beginner')
   const [goal, setGoal] = useState('timing')
+  const [language, setLanguage] = useState('English')
 
   if (!isOpen) return null;
 
@@ -356,7 +357,16 @@ function OnboardingModal({ isOpen, onSubmit }) {
            </select>
         </div>
 
-        <button className="btn" style={{marginTop: '24px', width: '100%', padding: '12px', fontSize: '1rem'}} onClick={() => onSubmit({skill, goal})}>
+        <div className="field" style={{marginTop: 12}}>
+           <label>Preferred AI Language</label>
+           <select value={language} onChange={e => setLanguage(e.target.value)}>
+              <option value="English">English</option>
+              <option value="Magyar (Hungarian)">Magyar (Hungarian)</option>
+              <option value="Español (Spanish)">Español (Spanish)</option>
+           </select>
+        </div>
+
+        <button className="btn" style={{marginTop: '24px', width: '100%', padding: '12px', fontSize: '1rem'}} onClick={() => onSubmit({skill, goal, language})}>
           Start My Journey
         </button>
       </div>
@@ -397,10 +407,10 @@ export default function App() {
     }
   }, [isLoaded, isSignedIn, getToken])
 
-  const handleOnboardingSubmit = async ({ skill, goal }) => {
+  const handleOnboardingSubmit = async ({ skill, goal, language }) => {
      try {
        const jwt = await getToken()
-       const { data } = await axios.post('/api/profile', { skill_level: skill, goal: goal }, {
+       const { data } = await axios.post('/api/profile', { skill_level: skill, goal: goal, language: language }, {
          headers: { Authorization: `Bearer ${jwt}` }
        })
        setProfile(data)

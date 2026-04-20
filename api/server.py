@@ -68,6 +68,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 return jsonify({"error": "No data"}), 400
             user.skill_level = data.get("skill_level", user.skill_level)
             user.goal = data.get("goal", user.goal)
+            user.language = data.get("language", user.language)
             
             # auto-generate a learning focus based on goal if they just onboarded
             if user.goal:
@@ -78,6 +79,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         return jsonify({
             "skill_level": user.skill_level,
             "goal": user.goal,
+            "language": user.language,
             "streak_days": learning_state.streak_days,
             "current_focus": learning_state.current_focus
         })
@@ -145,6 +147,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             ai_context = {
                 "skill_level": user.skill_level or "beginner",
                 "goal": user.goal or "general improvement",
+                "language": user.language or "English",
                 "last_timing_error": last_metrics.timing_error if last_metrics else None,
                 "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
             }

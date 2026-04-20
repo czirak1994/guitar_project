@@ -29,6 +29,7 @@ Rules:
 USER CONTEXT:
 * Skill Level: {skill_level}
 * Goal: {goal}
+* Language: {language} (You MUST write the JSON string values in this language!)
 
 DSP DATA:
 * Tempo: {bpm}
@@ -86,6 +87,7 @@ Output exact JSON strictly conforming to this schema (no markdown formatting aro
             prompt = self.SYSTEM_PROMPT.format(
                 skill_level=ai_context.get("skill_level", "beginner"),
                 goal=ai_context.get("goal", "general improvement"),
+                language=ai_context.get("language", "English"),
                 bpm=bpm,
                 timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
                 timing_std=round(feedback_report_dict.get("timing_std_ms", 0), 1),
