@@ -19,7 +19,7 @@ Your job is to give highly constructive, musical, and technical feedback in JSON
 
 Rules:
 * You MUST carefully analyze the provided WAV audio file to detect the underlying Scale/Key and Rhythm.
-* IF a backing track is provided, compare the student's playing to the backing track's harmony and tempo. Help them stay in key and 'in the pocket'.
+* IF a backing track URL is provided below, use it to understand the harmonic and rhythmic context the student was playing over. Compare the student's playing to the backing track's key, tempo, and feel. Help them stay in key and 'in the pocket'.
 * Speak like a real, encouraging music mentor.
 * Be conversational in the 'musical_advice' field, focusing on phrasing, dynamics, and feel.
 * Keep 'technical_focus' strictly limited to fixing the primary mechanical error based on DSP metrics.
@@ -29,6 +29,9 @@ USER CONTEXT:
 * Skill Level: {skill_level}
 * Goal: {goal}
 * Language: {language} (You MUST write all generated text in this language!)
+
+BACKING TRACK:
+{backing_track_context}
 
 DSP DATA:
 * Tempo: {bpm}
@@ -80,10 +83,17 @@ Output exact JSON strictly conforming to this schema:
             errors = feedback_report_dict.get("errors", [])
             issues_str = "\n  - ".join([e["message"] for e in errors]) if errors else "None detected"
 
+            backing_track_context = (
+                f"YouTube URL: {youtube_url}"
+                if youtube_url
+                else "No backing track provided."
+            )
+
             prompt = self.SYSTEM_PROMPT.format(
                 skill_level=ai_context.get("skill_level", "beginner"),
                 goal=ai_context.get("goal", "general improvement"),
                 language=ai_context.get("language", "English"),
+                backing_track_context=backing_track_context,
                 bpm=bpm,
                 timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
                 timing_std=round(feedback_report_dict.get("timing_std_ms", 0), 1),
@@ -106,12 +116,11 @@ Output exact JSON strictly conforming to this schema:
             from google.genai import types
 
             contents_list = [types.Part(text=prompt)]
-            
+
             if youtube_url:
-                 print(f"[AICoach] Injecting YouTube Context Source: {youtube_url}")
-                 # Gemini 1.5 Pro natively supports YouTube URLs in the FileData URI
-                 contents_list.append(types.Part(file_data=types.FileData(file_uri=youtube_url)))
-            
+                print(f"[AICoach] Injecting YouTube backing track as text context: {youtube_url}")
+                contents_list.append(types.Part(text=f"Backing track (YouTube): {youtube_url}"))
+
             contents_list.append(types.Part(file_data=types.FileData(file_uri=audio_file.uri)))
             
             print("[AICoach] Generating advice...")
