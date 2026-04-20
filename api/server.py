@@ -162,8 +162,9 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             # Analyze
             report = analyze_wav_file(str(tmp), config, ai_context=ai_context, run_ai=False)
             
-            # Silence Detection: If signal is too quiet or no notes detected, skip AI
-            is_silent = report.get("amplitude_db", -100) < -50 or not report.get("detected_notes")
+            # Silence Detection: threshold lowered to -60dB (more sensitive)
+            # We skip AI only if it's practically absolute silence OR no notes were extracted
+            is_silent = report.get("amplitude_db", -100) < -60 and not report.get("detected_notes")
             
             # Save Session to DB
             duration = report.get("duration", 0)

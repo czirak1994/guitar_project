@@ -22,9 +22,17 @@ def create_checkout_session():
         return jsonify({"error": "Unauthorized"}), 401
 
     try:
-        base_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
-        if not base_url.startswith("http"):
-            base_url = f"https://{base_url}"
+        # Robust URL construction to prevent Stripe "Not a valid URL" errors
+        raw_url = os.getenv("FRONTEND_URL")
+        if not raw_url or len(raw_url.strip()) == 0:
+            base_url = "http://localhost:5173"
+        else:
+            base_url = raw_url.strip().rstrip("/")
+            if not base_url.startswith("http"):
+                # Default to https for production domains if protocol is missing
+                base_url = f"https://{base_url}"
+
+        print(f"[Stripe] Creating session with base_url: {base_url}")
 
         # Create a new Checkout Session for the PRO plan
         checkout_session = stripe.checkout.Session.create(

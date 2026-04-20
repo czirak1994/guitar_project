@@ -112,7 +112,8 @@ Output exact JSON strictly conforming to this schema:
                  # Gemini 1.5 Pro natively supports YouTube URLs in the FileData URI
                  contents_list.append(types.Part(file_data=types.FileData(file_uri=youtube_url)))
             
-            contents_list.append(types.Part(file_data=types.FileData(file_uri=audio_file.uri)))
+            # Explicitly set mime_type for audio to avoid ambiguity
+            contents_list.append(types.Part(file_data=types.FileData(file_uri=audio_file.uri, mime_type="audio/wav")))
             
             print("[AICoach] Generating advice...")
             
