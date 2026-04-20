@@ -167,9 +167,18 @@ Output exact JSON strictly conforming to this schema:
             tips.append("Focus on improving your timing with a metronome.")
             
         return {
-            "summary": "Great effort! The AI audio analysis timed out, but the basic engine detected some variations.",
-            "detected_scale": "Unknown (Offline)",
-            "detected_rhythm": "Unknown (Offline)",
-            "musical_advice": "Try to focus on consistent dynamics and a flowing rhythm.",
+            "summary": "AI analysis was unable to complete for this take.",
+            "detected_scale": "Not Detected",
+            "detected_rhythm": "Not Detected",
+            "musical_advice": "Ensure your guitar is loud and clear for the AI to provide detailed feedback.",
             "technical_focus": tips[0] if tips else "Keep practicing with the metronome."
+        }
+
+    def _silence_fallback(self, report: dict) -> dict:
+        return {
+            "summary": "No guitar signal was detected in this recording.",
+            "detected_scale": "N/A",
+            "detected_rhythm": "N/A",
+            "musical_advice": "Check your input volume and microphone connection. The AI needs to hear your playing clearly to analyze it.",
+            "technical_focus": "Check cable/input gain."
         }

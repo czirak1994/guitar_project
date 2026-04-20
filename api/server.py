@@ -159,15 +159,29 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
             }
 
-            # Analyze (run_ai=False ensures we don't block the request; AI is handled in background thread)
+            # Analyze
             report = analyze_wav_file(str(tmp), config, ai_context=ai_context, run_ai=False)
+            
+            # Silence Detection: If signal is too quiet or no notes detected, skip AI
+            is_silent = report.get("amplitude_db", -100) < -50 or not report.get("detected_notes")
             
             # Save Session to DB
             duration = report.get("duration", 0)
             backing_track_url = request.form.get("backing_track_url")
-            new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url)
+            # If silent, we mark it as 'completed' immediately with a skip flag
+            ai_status = 'completed' if is_silent else 'processing'
+            
+            new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url, ai_status=ai_status)
             db.session.add(new_session)
             db.session.flush() # get ID
+
+            if is_silent:
+                print(f"[Async AI] Silence detected ({report.get('amplitude_db')}dB). Skipping AI.")
+                from feedback.ai_coach import AICoach
+                coach = AICoach(config.ai)
+                silent_advice = coach._silence_fallback(report)
+                fb = AIFeedback(session_id=new_session.id, detailed_feedback=json.dumps(silent_advice))
+                db.session.add(fb)
             
             metrics = PerformanceMetric(
                 session_id=new_session.id,
@@ -212,14 +226,16 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                         except Exception:
                             pass
 
-            app_clone = app
-            # backing_track_url is now the raw YouTube URL from the frontend
-            t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
-            t.start()
+            # Start Async AI only if not silent
+            if not is_silent:
+                app_clone = app
+                # backing_track_url is now the raw YouTube URL from the frontend
+                t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
+                t.start()
 
             return jsonify({
                 "session_id": new_session.id,
-                "status": "processing_ai",
+                "status": "completed" if is_silent else "processing_ai",
                 "accuracy_pct": report.get("accuracy_pct"),
                 "bpm": config.analysis.bpm,
                 "streak_days": learning_state.streak_days,
