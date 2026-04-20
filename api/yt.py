@@ -19,7 +19,14 @@ def get_youtube_audio(url: str, output_dir: str) -> dict:
         'outtmpl': os.path.join(output_dir, f'{file_id}.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': False
+        'extract_flat': False,
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+                'skip': ['hls', 'dash']
+            }
+        }
     }
 
     try:
