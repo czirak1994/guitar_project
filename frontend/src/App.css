@@ -413,3 +413,7 @@ html, body, #root {
 .ai-encouragement {
   font-size: 0.85rem; font-style: italic; color: var(--text-2); text-align: center; margin-top: 12px;
 }
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}

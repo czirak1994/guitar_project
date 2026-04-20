@@ -42,6 +42,8 @@ class Session(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     bpm = db.Column(db.Float, nullable=True)
     duration = db.Column(db.Float, nullable=True)
+    ai_status = db.Column(db.String, default='pending') # pending, completed, failed
+    backing_track_url = db.Column(db.String, nullable=True)
     
     performance_metric = db.relationship('PerformanceMetric', backref='session', uselist=False, lazy=True)
     ai_feedback = db.relationship('AIFeedback', backref='session', uselist=False, lazy=True)

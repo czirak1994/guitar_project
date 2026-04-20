@@ -67,7 +67,7 @@ Output exact JSON strictly conforming to this schema:
     def is_available(self) -> bool:
         return self._client is not None
 
-    def evaluate_audio(self, wav_path: str, feedback_report_dict: dict, bpm: float = 120.0, ai_context: dict = None) -> dict:
+    def evaluate_audio(self, wav_path: str, feedback_report_dict: dict, bpm: float = 120.0, ai_context: dict = None, backing_track_path: str = None) -> dict:
         if ai_context is None:
             ai_context = {}
 
@@ -94,6 +94,18 @@ Output exact JSON strictly conforming to this schema:
             print(f"[AICoach] Uploading audio to Gemini: {wav_path}")
             audio_file = self._client.files.upload(file=wav_path)
             
+            contents_list = [prompt]
+            
+            if backing_track_path and __import__('os').path.exists(backing_track_path):
+                 print(f"[AICoach] Uploading backing track: {backing_track_path}")
+                 bt_file = self._client.files.upload(file=backing_track_path)
+                 contents_list.append("\nProvided below is the original backing track for reference:\n")
+                 contents_list.append(bt_file)
+                 contents_list.append("\nProvided below is the student's raw guitar recording playing over the track:\n")
+                 contents_list.append(audio_file)
+            else:
+                 contents_list.append(audio_file)
+            
             while audio_file.state.name == "PROCESSING":
                 time.sleep(1)
                 audio_file = self._client.files.get(name=audio_file.name)
@@ -104,30 +116,44 @@ Output exact JSON strictly conforming to this schema:
             from google.genai import types
 
             print("[AICoach] Generating advice...")
-            response = self._client.models.generate_content(
-                model=self.config.model,
-                contents=[prompt, audio_file],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
             
-            try:
-                self._client.files.delete(name=audio_file.name)
-            except Exception as e:
-                pass
-
-            if response.text:
-                text = response.text.strip()
-                if text.startswith('```json'): text = text[7:]
-                if text.startswith('```'): text = text[3:]
-                if text.endswith('```'): text = text[:-3]
+            for attempt in range(3):
                 try:
-                    return json.loads(text.strip())
-                except Exception as parse_e:
-                    print(f"[AICoach] JSON Parse Error. Raw text:\n{text}\nError: {parse_e}")
-                    raise parse_e
-            return self._fallback(feedback_report_dict)
+                    response = self._client.models.generate_content(
+                        model=self.config.model,
+                        contents=contents_list,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    
+                    if response.text:
+                        text = response.text.strip()
+                        if text.startswith('```json'): text = text[7:]
+                        if text.startswith('```'): text = text[3:]
+                        if text.endswith('```'): text = text[:-3]
+                        try:
+                            result_data = json.loads(text.strip())
+                            try:
+                                self._client.files.delete(name=audio_file.name)
+                                if backing_track_path:
+                                     self._client.files.delete(name=bt_file.name)
+                            except Exception:
+                                pass
+                            return result_data
+                        except Exception as parse_e:
+                            print(f"[AICoach] JSON Parse Error (Attempt {attempt+1}): {parse_e}")
+                            if attempt == 2: raise parse_e
+                except Exception as api_e:
+                    print(f"[AICoach] API call attempt {attempt+1} failed: {api_e}")
+                    if attempt == 2:
+                        try:
+                            self._client.files.delete(name=audio_file.name)
+                            if backing_track_path: self._client.files.delete(name=bt_file.name)
+                        except Exception:
+                            pass
+                        raise api_e
+                    time.sleep(2)
 
         except Exception as e:
             print(f"[AICoach] API call failed: {e}")

@@ -331,6 +331,46 @@ function LatestStatsWidget({ result }) {
   )
 }
 
+function YoutubeWidget({ backingTrack, setBackingTrack, disabled, getToken }) {
+  const [url, setUrl] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  const handleLoad = async () => {
+    if (!url) return;
+    setLoading(true); setError("")
+    try {
+      const jwt = await getToken();
+      const { data } = await axios.post('/api/yt/extract', { url }, { headers: { Authorization: `Bearer ${jwt}` } });
+      setBackingTrack(data)
+    } catch(e) {
+      setError("Failed to load track. Ensure the URL is valid.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="widget" style={{paddingBottom: '24px'}}>
+      <div className="widget-title">YouTube Backing Track</div>
+      {backingTrack ? (
+         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+            <div style={{color: 'var(--accent)', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%'}}>
+               🎵 {backingTrack.title}
+            </div>
+            <button className="btn" style={{padding: '4px 8px'}} onClick={() => setBackingTrack(null)} disabled={disabled}>Clear</button>
+         </div>
+      ) : (
+         <div className="controls-grid" style={{gridTemplateColumns: '1fr auto', gap: 8}}>
+            <input className="input-field" placeholder="Paste YouTube URL..." value={url} onChange={e=>setUrl(e.target.value)} disabled={disabled || loading}/>
+            <button className="btn" onClick={handleLoad} disabled={disabled || loading || !url}>{loading ? '...' : 'Load'}</button>
+         </div>
+      )}
+      {error && <div style={{color: 'var(--red)', fontSize: '0.8rem', marginTop: '8px'}}>{error}</div>}
+    </div>
+  )
+}
+
 function OnboardingModal({ isOpen, onSubmit }) {
   const [skill, setSkill] = useState('beginner')
   const [goal, setGoal] = useState('timing')
@@ -392,6 +432,9 @@ export default function App() {
   const [sessionHistory, setSessionHistory] = useState([])
   const [profile, setProfile] = useState(null)
   const [pendingAudio, setPendingAudio] = useState(null)
+  const [backingTrack, setBackingTrack] = useState(null)
+  
+  const backingAudioRef = useRef(null)
   
   const [tunerActive, setTunerActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
@@ -483,12 +526,17 @@ export default function App() {
       processor.connect(audioCtx.destination)
       
       setPhase('recording')
+      if (backingTrack && backingAudioRef.current) {
+          backingAudioRef.current.currentTime = 0;
+          backingAudioRef.current.play().catch(e => console.error(e));
+      }
       
       recordingRef.current = {
         active: true,
         stop: async () => {
             if (!recordingRef.current.active) return
             recordingRef.current.active = false
+            if (backingTrack && backingAudioRef.current) backingAudioRef.current.pause();
             
             processor.disconnect()
             source.disconnect()
@@ -513,6 +561,20 @@ export default function App() {
       }
   }
 
+  const pollAI = (sessionId, jwt) => {
+      const timer = setInterval(async () => {
+          try {
+              const { data } = await axios.get(`/api/session/${sessionId}`, { headers: { Authorization: `Bearer ${jwt}` } });
+              if (data.ai_status === 'completed' || data.ai_status === 'failed') {
+                  clearInterval(timer);
+                  setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? { ...s, ai_status: data.ai_status, ai_advice: data.ai_advice } : s));
+              }
+          } catch(e) {
+              clearInterval(timer);
+          }
+      }, 3000);
+  }
+
   const handleAnalyzeTake = async () => {
     if (!pendingAudio) return
     setPhase('analyzing')
@@ -521,6 +583,7 @@ export default function App() {
     const formData = new FormData()
     formData.append('file', pendingAudio.blob, 'recording.wav')
     formData.append('bpm', bpm)
+    if (backingTrack) formData.append('backing_track_url', backingTrack.audio_url)
     
     try {
         const jwt = await getToken()
@@ -531,11 +594,21 @@ export default function App() {
         if (data.streak_days !== undefined) {
            setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
         }
-        setSessionHistory(prev => [...prev, {
+        
+        const newSession = {
           id: Date.now(),
+          backend_id: data.session_id,
           time: new Date().toLocaleTimeString(),
+          ai_status: data.status === 'processing_ai' ? 'pending' : 'completed',
           ...data
-        }])
+        }
+
+        setSessionHistory(prev => [...prev, newSession])
+        
+        if (data.status === 'processing_ai') {
+            pollAI(data.session_id, jwt);
+        }
+
         setPhase('idle')
         setPendingAudio(null)
     } catch(e) {
@@ -635,7 +708,7 @@ export default function App() {
                 </div>
 
                 <div className="metronome-controls">
-                  <button className="btn" style={{padding: '4px 8px'}} onClick={() => setMetroMuted(m => !m)} disabled={phase !== 'recording'}>
+                  <button className="btn" style={{padding: '4px 8px'}} onClick={() => setMetroMuted(m => !m)}>
                     {metroMuted ? 'Unmute Metro' : 'Mute Metro'}
                   </button>
                   <div className="metro-dots">
@@ -648,6 +721,8 @@ export default function App() {
 
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
               <SettingsWidget bpm={bpm} setBpm={setBpm} metroVolume={metroVolume} setMetroVolume={setMetroVolume} />
+              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase !== 'idle'} getToken={getToken} />
+              {backingTrack && <audio ref={backingAudioRef} src={backingTrack.audio_url} preload="auto" style={{display: 'none'}} />}
               <LatestStatsWidget result={latestResult} />
             </div>
 
@@ -672,7 +747,16 @@ export default function App() {
                          </div>
                        </div>
                        
-                       {item.ai_advice && typeof item.ai_advice === 'object' && (
+                       {item.ai_status === 'pending' && (
+                           <div className="ai-feedback-box" style={{opacity: 0.7, textAlign: 'center'}}>
+                               <div style={{display: 'inline-block', width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 8, marginTop: 8}}></div>
+                               <div style={{fontSize: '0.9rem', color: 'var(--text-2)'}}>ToneSense AI is analyzing your performance...</div>
+                           </div>
+                       )}
+                       {item.ai_status === 'failed' && (
+                           <div className="ai-feedback-box" style={{color: 'var(--red)', fontSize: '0.9rem'}}>AI Analysis processing failed. Please try again.</div>
+                       )}
+                       {item.ai_status !== 'pending' && item.ai_status !== 'failed' && item.ai_advice && typeof item.ai_advice === 'object' && (
                           <div className="ai-feedback-box">
                              <div className="ai-feedback-header">Performance Review</div>
                              <div className="ai-summary">{item.ai_advice.summary}</div>

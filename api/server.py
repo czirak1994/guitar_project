@@ -11,6 +11,8 @@ import time
 import os
 from pathlib import Path
 import datetime
+import threading
+import json
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -162,7 +164,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             
             # Save Session to DB
             duration = report.get("duration", 0)
-            new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration)
+            backing_track_url = request.form.get("backing_track_url")
+            new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url)
             db.session.add(new_session)
             db.session.flush() # get ID
             
@@ -175,40 +178,108 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             )
             db.session.add(metrics)
             
-            ai_advice_dict = report.get("ai_advice", {})
-            if isinstance(ai_advice_dict, str):
-                import json
-                try:
-                    ai_advice_dict = json.loads(ai_advice_dict)
-                except Exception:
-                    ai_advice_dict = {"feedback": ai_advice_dict}
-
-            # Make sure we don't break JS
-            report["ai_advice"] = ai_advice_dict
-
-            feedback_rec = AIFeedback(
-                session_id=new_session.id,
-                detailed_feedback=str(ai_advice_dict)
-            )
-            db.session.add(feedback_rec)
-
             # Record usage
             user.record_usage()
             db.session.commit()
             
-            # Include streak info in response
-            report["streak_days"] = learning_state.streak_days
-            report["current_focus"] = learning_state.current_focus
-            
-            results = report
-            return jsonify(report)
+            # Start Async AI
+            def run_async_ai(app_clone, sess_id, wave_path, cfg, rep, cxt, bt_url):
+                with app_clone.app_context():
+                    bt_path = None
+                    if bt_url and bt_url.startswith('/api/audio/'):
+                        bt_filename = bt_url.split('/')[-1]
+                        potential_path = os.path.join(os.environ.get("TEMP", "/tmp"), bt_filename)
+                        if os.path.exists(potential_path):
+                            bt_path = potential_path
+                            print(f"[Async] Found backing track at {bt_path}")
+
+                    try:
+                        from feedback.ai_coach import AICoach
+                        coach = AICoach(cfg.ai)
+                        if cfg.ai.enabled:
+                            ai_advice = coach.evaluate_audio(wave_path, rep, cfg.analysis.bpm, cxt, bt_path)
+                        else:
+                            ai_advice = coach._fallback(rep)
+                        
+                        s = Session.query.get(sess_id)
+                        if s:
+                            s.ai_status = 'completed'
+                            fb = AIFeedback(session_id=sess_id, detailed_feedback=json.dumps(ai_advice))
+                            db.session.add(fb)
+                            db.session.commit()
+                    except Exception as e:
+                        print(f"[Async AI] Error: {e}")
+                        s = Session.query.get(sess_id)
+                        if s:
+                            s.ai_status = 'failed'
+                            db.session.commit()
+                    finally:
+                        try:
+                            os.remove(wave_path)
+                        except Exception:
+                            pass
+
+            app_clone = app._get_current_object()
+            t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
+            t.start()
+
+            return jsonify({
+                "session_id": new_session.id,
+                "status": "processing_ai",
+                "accuracy_pct": report.get("accuracy_pct"),
+                "bpm": config.analysis.bpm,
+                "streak_days": learning_state.streak_days,
+                "current_focus": learning_state.current_focus
+            })
+
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
-        finally:
+        # tmp file removed in async thread
+
+    @app.route("/api/session/<int:session_id>", methods=["GET"])
+    @require_auth
+    def get_session(session_id):
+        session = Session.query.get_or_404(session_id)
+        if session.user_id != g.user_id:
+            return jsonify({"error": "Unauthorized"}), 403
+            
+        metrics = session.performance_metric
+        ai_fb = session.ai_feedback
+        
+        advice = None
+        if ai_fb and ai_fb.detailed_feedback:
             try:
-                tmp.unlink(missing_ok=True)
+                advice = json.loads(ai_fb.detailed_feedback)
             except Exception:
                 pass
+
+        return jsonify({
+            "id": session.id,
+            "ai_status": session.ai_status,
+            "accuracy_pct": metrics.pitch_accuracy if metrics else 0,
+            "bpm": session.bpm,
+            "ai_advice": advice
+        })
+
+    @app.route("/api/yt/extract", methods=["POST"])
+    @require_auth
+    def extract_yt():
+        url = request.json.get("url")
+        if not url: return jsonify({"error": "URL required"}), 400
+        
+        try:
+            from api.yt import get_youtube_audio
+            temp_dir = os.environ.get("TEMP", "/tmp")
+            res = get_youtube_audio(url, temp_dir)
+            filename = os.path.basename(res["filepath"])
+            return jsonify({"audio_url": f"/api/audio/{filename}", "title": res["title"]})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/audio/<filename>", methods=["GET"])
+    def serve_audio(filename):
+        temp_dir = os.environ.get("TEMP", "/tmp")
+        return send_from_directory(temp_dir, filename)
 
     # ── Serve React build (production) ───────────────────────────────────────
     if static_dir:
