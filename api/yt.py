@@ -23,10 +23,11 @@ def get_youtube_audio(url: str, output_dir: str) -> dict:
         'nocheckcertificate': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
-                'skip': ['hls', 'dash']
+                'player_client': ['ios'],
+                'player_skip': ['webpage', 'configs', 'js']
             }
-        }
+        },
+        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1'
     }
 
     try:
