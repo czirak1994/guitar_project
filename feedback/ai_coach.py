@@ -143,7 +143,11 @@ Output exact JSON strictly conforming to this schema:
                             print(f"[AICoach] JSON Parse Error (Attempt {attempt+1}): {parse_e}")
                             if attempt == 2: raise parse_e
                 except Exception as api_e:
-                    print(f"[AICoach] API call attempt {attempt+1} failed: {api_e}")
+                    print(f"[AICoach] API attempt {attempt+1} failed: {api_e}")
+                    # If it's a rate limit or auth error, log it clearly
+                    if "429" in str(api_e): print("[AICoach] Rate limited (2 RPM on Free Tier).")
+                    if "401" in str(api_e) or "403" in str(api_e): print("[AICoach] Auth/API Key error.")
+                    
                     if attempt == 2:
                         try:
                             self._client.files.delete(name=audio_file.name)
@@ -153,7 +157,7 @@ Output exact JSON strictly conforming to this schema:
                     time.sleep(2)
 
         except Exception as e:
-            print(f"[AICoach] API call failed: {e}")
+            print(f"[AICoach] TOTAL FAILURE: {e}")
             return self._fallback(feedback_report_dict)
 
     def _fallback(self, report: dict) -> dict:
