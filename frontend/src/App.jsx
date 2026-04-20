@@ -321,29 +321,59 @@ function LatestStatsWidget({ result }) {
           <div className="metric-box-lbl">Level</div>
         </div>
       </div>
-      {errors.length > 0 && (
-         <div style={{marginTop: 12}}>
-            <div className="metric-box-lbl" style={{marginBottom: 4}}>Issues Detected</div>
-            {errors.map((e, idx) => (
-              <div key={idx} className="issue-alert">
-                 <strong>{e.message}</strong>
-                 {e.detail && <span className="issue-alert-desc">{e.detail}</span>}
-              </div>
-            ))}
-         </div>
-      )}
+    </div>
+  )
+}
+
+function OnboardingModal({ isOpen, onSubmit }) {
+  const [skill, setSkill] = useState('beginner')
+  const [goal, setGoal] = useState('timing')
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content onboarding-content">
+        <h2>Welcome to Guitar Coach Pro</h2>
+        <p>Let's personalize your learning plan to build a daily habit.</p>
+        
+        <div className="field">
+           <label>What is your skill level?</label>
+           <select value={skill} onChange={e => setSkill(e.target.value)}>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+           </select>
+        </div>
+        
+        <div className="field" style={{marginTop: 12}}>
+           <label>What is your primary goal?</label>
+           <select value={goal} onChange={e => setGoal(e.target.value)}>
+              <option value="timing">Mastering Timing & Rhythm</option>
+              <option value="soloing">Soloing & Phrasing</option>
+              <option value="technique">Clean Technique</option>
+              <option value="speed">Building Speed</option>
+           </select>
+        </div>
+
+        <button className="btn" style={{marginTop: '24px', width: '100%', padding: '12px', fontSize: '1rem'}} onClick={() => onSubmit({skill, goal})}>
+          Start My Journey
+        </button>
+      </div>
     </div>
   )
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const { getToken } = useAuth()
+  const { getToken, isLoaded, isSignedIn } = useAuth()
   const [bpm, setBpm] = useState(120)
   
-  const [phase, setPhase] = useState('idle') // idle | recording | analyzing | paywall
+  const [phase, setPhase] = useState('idle') // idle | countdown | recording | analyzing | paywall
+  const [countdown, setCountdown] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [sessionHistory, setSessionHistory] = useState([])
+  const [profile, setProfile] = useState(null)
   
   const [tunerActive, setTunerActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
@@ -353,6 +383,30 @@ export default function App() {
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
   const historyEndRef = useRef(null)
+
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+       getToken().then(jwt => {
+         axios.get('/api/profile', { headers: { Authorization: `Bearer ${jwt}` } })
+           .then(res => {
+              setProfile(res.data)
+           })
+           .catch(err => console.error(err))
+       })
+    }
+  }, [isLoaded, isSignedIn, getToken])
+
+  const handleOnboardingSubmit = async ({ skill, goal }) => {
+     try {
+       const jwt = await getToken()
+       const { data } = await axios.post('/api/profile', { skill_level: skill, goal: goal }, {
+         headers: { Authorization: `Bearer ${jwt}` }
+       })
+       setProfile(data)
+     } catch (e) {
+       alert("Error saving profile")
+     }
+  }
 
   // Auto-scroll to latest feedback
   useEffect(() => {
@@ -373,8 +427,29 @@ export default function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-      const source = audioCtx.createMediaStreamSource(stream)
       
+      setPhase('countdown')
+      let count = 3
+      setCountdown(count)
+      
+      const timer = setInterval(() => {
+         count -= 1
+         setCountdown(count)
+         if (count <= 0) {
+            clearInterval(timer)
+            startActualRecord(stream, audioCtx)
+         }
+      }, 1000)
+
+    } catch (e) {
+      alert(e.message || 'Could not start recording')
+      setPhase('idle')
+      inFlightRef.current = false
+    }
+  }
+
+  const startActualRecord = (stream, audioCtx) => {
+      const source = audioCtx.createMediaStreamSource(stream)
       const processor = audioCtx.createScriptProcessor(4096, 1, 1)
       const pcmData = []
       
@@ -421,6 +496,11 @@ export default function App() {
                   headers: { Authorization: `Bearer ${jwt}` }
                 })
                 
+                // Update profile from response (streak, focus)
+                if (data.streak_days !== undefined) {
+                   setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
+                }
+
                 // Append to history
                 setSessionHistory(prev => [...prev, {
                   id: Date.now(),
@@ -441,15 +521,10 @@ export default function App() {
             }
         }
       }
-
-    } catch (e) {
-      alert(e.message || 'Could not start recording')
-      setPhase('idle')
-      inFlightRef.current = false
-    }
   }
 
   const latestResult = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null
+  const showOnboarding = profile && !profile.skill_level;
 
   return (
     <>
@@ -465,6 +540,16 @@ export default function App() {
       
       <SignedIn>
         <div className="app">
+          <OnboardingModal isOpen={showOnboarding} onSubmit={handleOnboardingSubmit} />
+
+          {/* 3-2-1 Countdown Overlay */}
+          {phase === 'countdown' && (
+             <div className="countdown-overlay">
+                <div className="countdown-number">{countdown}</div>
+                <div className="countdown-text">Get Ready...</div>
+             </div>
+          )}
+
           {/* Header */}
           <header className="app-header">
             <div className="app-title">Guitar Coach Pro</div>
@@ -473,16 +558,29 @@ export default function App() {
 
           <div className="workspace">
             {/* Left Panel: Controls */}
-            <div className="controls-panel">
+            <div className="controls-panel" style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}>
+              
+              {profile && profile.skill_level && (
+                 <div className="widget dashboard-habit-widget">
+                    <div className="habit-header">
+                       <span className="habit-streak">🔥 Streak: {profile.streak_days || 0} Days</span>
+                       <span className="habit-focus-label">Current Focus</span>
+                    </div>
+                    <div className="habit-focus-text">
+                       {profile.current_focus}
+                    </div>
+                 </div>
+              )}
+
               <div className="widget" style={{paddingBottom: '24px'}}>
                 <div className="transport-bar">
                   <button 
                     className={`record-btn-main ${phase}`} 
                     onClick={handleRecord}
-                    disabled={phase === 'analyzing'}
+                    disabled={phase === 'analyzing' || phase === 'countdown'}
                   >
                     <div className="rec-indicator" />
-                    {phase === 'recording' ? 'STOP' : phase === 'analyzing' ? 'ANALYZING' : 'RECORD'}
+                    {phase === 'recording' ? 'STOP' : phase === 'analyzing' ? 'ANALYZING' : phase === 'countdown' ? 'WAIT' : 'RECORD'}
                   </button>
                   <div className={`timer-display ${phase === 'recording' ? 'recording' : ''}`}>
                      {(elapsed).toFixed(1)}s
@@ -501,7 +599,7 @@ export default function App() {
                 </div>
               </div>
 
-              <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording'} />
+              <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
               <SettingsWidget bpm={bpm} setBpm={setBpm} />
               <LatestStatsWidget result={latestResult} />
             </div>
@@ -509,12 +607,12 @@ export default function App() {
             {/* Right Panel: Session History */}
             <div className="session-panel">
                <div className="widget" style={{borderBottom: '1px solid var(--border)', background: 'var(--bg-panel-hi)'}}>
-                 <div className="widget-title" style={{margin: 0}}>Session Tracker</div>
+                 <div className="widget-title" style={{margin: 0}}>Guided Practice History</div>
                </div>
                <div className="session-history-container">
                   {sessionHistory.length === 0 && (
                     <div className="empty-state">
-                      Record a take to populate the session history.
+                      Record a take to track your progress and receive AI feedback.
                     </div>
                   )}
                   {sessionHistory.map(item => (
@@ -523,26 +621,31 @@ export default function App() {
                          <span className="history-time">{item.time}</span>
                          <div className="history-result-stats">
                            <span className="stat-pill">ACC: {item.accuracy_pct?.toFixed(0)}%</span>
-                           <span className="stat-pill">NOTES: {item.notes?.length || 0}</span>
+                           <span className="stat-pill">BPM: {item.bpm || 120}</span>
                          </div>
                        </div>
                        
-                       {item.ai_advice && (
+                       {item.ai_advice && typeof item.ai_advice === 'object' && (
                           <div className="ai-feedback-box">
-                             <div className="ai-feedback-header">AI Instructor</div>
-                             <div style={{whiteSpace: 'pre-wrap'}}>{item.ai_advice}</div>
+                             <div className="ai-feedback-header">Progress Check</div>
+                             <div className="ai-summary">{item.ai_advice.summary}</div>
+                             
+                             <div className="ai-details-grid">
+                                <div className="ai-col issue">
+                                   <strong>Problem:</strong> {item.ai_advice.problem}
+                                </div>
+                                <div className="ai-col fix">
+                                   <strong>To Fix:</strong>
+                                   <ul>
+                                     {Array.isArray(item.ai_advice.fix) ? item.ai_advice.fix.map((f, i) => <li key={i}>{f}</li>) : <li>{item.ai_advice.fix}</li>}
+                                   </ul>
+                                </div>
+                             </div>
+                             
+                             <div className="ai-encouragement">{item.ai_advice.encouragement}</div>
                           </div>
                        )}
 
-                       {item.messages && item.messages.length > 0 && (
-                          <div className="history-engine-logs">
-                             {item.messages.map((msg, i) => (
-                               <div key={i} className="history-engine-item">
-                                 <span className="engine-bullet">▸</span> {msg}
-                               </div>
-                             ))}
-                          </div>
-                       )}
                     </div>
                   ))}
                   <div ref={historyEndRef} />

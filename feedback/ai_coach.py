@@ -14,38 +14,45 @@ class AICoach:
     SYSTEM_PROMPT = """You are a professional guitar teacher and audio engineer.
 
 You are analyzing a student's guitar performance using:
-
 1. Raw audio recording
 2. DSP metrics (timing, pitch, dynamics)
+3. Previous session data (to track progress)
 
-Your job is to give precise, technical, and actionable feedback.
+Your job is to give precise, technical, and actionable feedback in JSON format.
 
 Rules:
+* Do NOT give generic advice. Do NOT give textual vomit.
+* Follow the JSON structure strictly.
+* Speak like a real coach, but extremely concise.
+* Use concrete observations from the data (e.g. "Your timing improved by 10ms").
 
-* Do NOT give generic advice
-* Focus on the biggest 2–3 mistakes
-* Use concrete observations from the data
-* Be concise but specific
-* Give clear improvement steps
+USER CONTEXT:
+* Skill Level: {skill_level}
+* Goal: {goal}
 
 DSP DATA:
-
 * Tempo: {bpm}
 * Timing deviation: {timing_ms} ms avg
 * Timing consistency: {timing_std}
 * Pitch accuracy: {pitch_accuracy}%
 * Detected issues: {issues_list}
 
-After analyzing the audio and DSP data:
+PREVIOUS SESSION:
+* Previous Timing deviation: {last_timing_ms} ms avg
+* Previous Pitch accuracy: {last_pitch_accuracy}%
 
-Output format:
-
-1. Main Problems (bullet points)
-2. Why it happens
-3. How to fix (step-by-step)
-4. Short encouragement
-
-Speak like a real coach, not like an AI."""
+Output exact JSON strictly conforming to this schema (no markdown formatting around it!):
+{{
+  "summary": "1 sentence summarizing progress (e.g., 'You improved your timing consistency, but are still rushing on the downbeat.')",
+  "problem": "1 main problem (max 10 words)",
+  "cause": "1 main cause of the problem (max 10 words)",
+  "fix": [
+     "Step 1 to fix the problem",
+     "Step 2 (optional)"
+  ],
+  "encouragement": "Short 1 sentence encouragement."
+}}
+"""
 
     def __init__(self, config: AIConfig):
         self.config = config
@@ -54,6 +61,7 @@ Speak like a real coach, not like an AI."""
         if config.enabled and config.api_key:
             try:
                 from google import genai
+                from google.genai import types
                 self._client = genai.Client(api_key=config.api_key)
             except ImportError:
                 print("[AICoach] google-genai package not installed")
@@ -64,17 +72,10 @@ Speak like a real coach, not like an AI."""
     def is_available(self) -> bool:
         return self._client is not None
 
-    def evaluate_audio(self, wav_path: str, feedback_report_dict: dict, bpm: float = 120.0) -> str:
-        """Generate AI coaching advice from a WAV file and a feedback report.
+    def evaluate_audio(self, wav_path: str, feedback_report_dict: dict, bpm: float = 120.0, ai_context: dict = None) -> dict:
+        if ai_context is None:
+            ai_context = {}
 
-        Args:
-            wav_path: path to the temporary .wav file
-            feedback_report_dict: the FeedbackReport as a dict
-            bpm: The metronome tempo used for the recording
-
-        Returns:
-            Natural language coaching advice.
-        """
         if not self.is_available:
             return self._fallback(feedback_report_dict)
 
@@ -83,18 +84,20 @@ Speak like a real coach, not like an AI."""
             issues_str = "\n  - ".join([e["message"] for e in errors]) if errors else "None detected"
 
             prompt = self.SYSTEM_PROMPT.format(
+                skill_level=ai_context.get("skill_level", "beginner"),
+                goal=ai_context.get("goal", "general improvement"),
                 bpm=bpm,
                 timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
                 timing_std=round(feedback_report_dict.get("timing_std_ms", 0), 1),
                 pitch_accuracy=round(feedback_report_dict.get("accuracy_pct", 0), 1),
-                issues_list=issues_str
+                issues_list=issues_str,
+                last_timing_ms=ai_context.get("last_timing_error") or "N/A",
+                last_pitch_accuracy=ai_context.get("last_accuracy") or "N/A"
             )
             
-            # Upload the audio file to Gemini
             print(f"[AICoach] Uploading audio to Gemini: {wav_path}")
             audio_file = self._client.files.upload(file=wav_path)
             
-            # We must wait until the file is completely processed by Gemini before generating
             while audio_file.state.name == "PROCESSING":
                 time.sleep(1)
                 audio_file = self._client.files.get(name=audio_file.name)
@@ -102,39 +105,45 @@ Speak like a real coach, not like an AI."""
             if audio_file.state.name == "FAILED":
                 raise ValueError("Gemini failed to process the audio file.")
 
-
+            from google.genai import types
 
             print("[AICoach] Generating advice...")
             response = self._client.models.generate_content(
                 model=self.config.model,
-                contents=[prompt, audio_file]
+                contents=[prompt, audio_file],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                ),
             )
             
-            # Clean up the file from Google's servers
             try:
                 self._client.files.delete(name=audio_file.name)
             except Exception as e:
-                print(f"[AICoach] Warning: could not delete temporary file from Gemini: {e}")
+                pass
 
             if response.text:
-                return response.text.strip()
+                return json.loads(response.text.strip())
             return self._fallback(feedback_report_dict)
 
         except Exception as e:
             print(f"[AICoach] API call failed: {e}")
             return self._fallback(feedback_report_dict)
 
-    def _fallback(self, report: dict) -> str:
-        """Simple rule-based fallback when AI is unavailable."""
+    def _fallback(self, report: dict) -> dict:
         tips = []
         messages = report.get("messages", [])
 
         if messages:
-            tips.append("Based on your session:")
-            for msg in messages[:3]:
-                tips.append(f"  • {msg}")
+             for msg in messages[:2]:
+                 tips.append(msg)
 
         if not tips:
-            tips.append("Keep practicing! Consistency is key to improvement.")
-
-        return "\n".join(tips)
+            tips.append("Practice to a metronome.")
+            
+        return {
+            "summary": "Keep practicing! Consistency is key.",
+            "problem": "Timing variations.",
+            "cause": "Lack of synchronization.",
+            "fix": tips,
+            "encouragement": "You'll get there!"
+        }

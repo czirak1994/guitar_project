@@ -21,7 +21,7 @@ if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
 from config import AppConfig, AudioConfig, DSPConfig, AnalysisConfig
 
 
-def analyze_wav_file(filepath: str, config: AppConfig) -> dict:
+def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None) -> dict:
     """Analyze a WAV file offline and return the feedback report as dict."""
     import soundfile as sf
     from dsp.pitch import yin_pitch_track
@@ -148,7 +148,7 @@ def analyze_wav_file(filepath: str, config: AppConfig) -> dict:
     if config.ai.enabled:
         print("Running AI Audio Coach analysis...")
         coach = AICoach(config.ai)
-        report_dict["ai_advice"] = coach.evaluate_audio(filepath, report_dict, config.analysis.bpm)
+        report_dict["ai_advice"] = coach.evaluate_audio(filepath, report_dict, config.analysis.bpm, ai_context)
     else:
         # Fallback if disabled
         coach = AICoach(config.ai)

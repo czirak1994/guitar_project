@@ -325,3 +325,76 @@ html, body, #root {
 }
 .modal-content h2 { color: var(--yellow); margin-bottom: 12px; font-weight: 500; }
 .modal-content p { color: var(--text-2); font-size: 0.9rem; margin-bottom: 20px; line-height: 1.5; }
+
+/* ── New Feature Styles ──────────────────────────────── */
+
+/* Onboarding Modal */
+.onboarding-content {
+  text-align: left;
+}
+.onboarding-content h2 {
+  color: var(--text-1);
+}
+
+/* Countdown Overlay */
+.countdown-overlay {
+  position: absolute; inset: 0;
+  background: rgba(17, 17, 17, 0.9);
+  z-index: 500;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.countdown-number {
+  font-size: 8rem; font-weight: 700; color: var(--accent); font-family: 'JetBrains Mono', monospace;
+  animation: pulse 1s infinite;
+}
+.countdown-text {
+  font-size: 1.5rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 2px;
+}
+@keyframes pulse {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+/* Habit Dashboard Widget */
+.dashboard-habit-widget {
+  background: var(--bg-panel-hi);
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+}
+.habit-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+.habit-streak {
+  font-weight: 600; color: var(--yellow); font-size: 0.85rem;
+}
+.habit-focus-label {
+  font-size: 0.65rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px;
+}
+.habit-focus-text {
+  font-size: 0.9rem; color: var(--text-1); line-height: 1.4;
+}
+
+/* AI Detailed Split */
+.ai-summary {
+  font-size: 0.9rem; font-weight: 500; margin-bottom: 12px; color: var(--text-1);
+}
+.ai-details-grid {
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;
+  background: var(--bg-deep); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.ai-col {
+  font-size: 0.85rem;
+}
+.ai-col.issue { color: var(--red); }
+.ai-col.fix { color: var(--accent-dim); }
+.ai-col ul {
+  padding-left: 20px; margin-top: 4px;
+}
+.ai-col ul li {
+  margin-bottom: 4px;
+}
+.ai-encouragement {
+  font-size: 0.85rem; font-style: italic; color: var(--text-2); text-align: center; margin-top: 12px;
+}
