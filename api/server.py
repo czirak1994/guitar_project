@@ -159,8 +159,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
             }
 
-            # Analyze
-            report = analyze_wav_file(str(tmp), config, ai_context=ai_context)
+            # Analyze (run_ai=False ensures we don't block the request; AI is handled in background thread)
+            report = analyze_wav_file(str(tmp), config, ai_context=ai_context, run_ai=False)
             
             # Save Session to DB
             duration = report.get("duration", 0)
