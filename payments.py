@@ -22,6 +22,10 @@ def create_checkout_session():
         return jsonify({"error": "Unauthorized"}), 401
 
     try:
+        base_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        if not base_url.startswith("http"):
+            base_url = f"https://{base_url}"
+
         # Create a new Checkout Session for the PRO plan
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -33,8 +37,8 @@ def create_checkout_session():
                 },
             ],
             mode='subscription',
-            success_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/?success=true",
-            cancel_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/?canceled=true",
+            success_url=f"{base_url}/?success=true",
+            cancel_url=f"{base_url}/?canceled=true",
             metadata={
                 "user_id": user_id
             }
