@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
+import PerformanceChart from './PerformanceChart'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import './App.css'
 
@@ -270,7 +271,7 @@ function TunerWidget({ active, onToggle, disabled }) {
   )
 }
 
-function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume }) {
+function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume, backingVolume, setBackingVolume, hasBackingTrack }) {
   return (
     <div className="widget">
       <div className="widget-title">Engine Parameters</div>
@@ -283,6 +284,12 @@ function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume }) {
           <label>Metronome Vol</label>
           <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
         </div>
+        {hasBackingTrack && (
+          <div className="field">
+            <label>Backing Vol</label>
+            <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -425,6 +432,7 @@ export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const [bpm, setBpm] = useState(120)
   const [metroVolume, setMetroVolume] = useState(0.5)
+  const [backingVolume, setBackingVolume] = useState(0.5)
   
   const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | analyzing | paywall
   const [countdown, setCountdown] = useState(0)
@@ -444,6 +452,12 @@ export default function App() {
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
   const historyEndRef = useRef(null)
+
+  useEffect(() => {
+    if (backingAudioRef.current) {
+       backingAudioRef.current.volume = backingVolume;
+    }
+  }, [backingVolume])
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
@@ -720,7 +734,12 @@ export default function App() {
               </div>
 
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
-              <SettingsWidget bpm={bpm} setBpm={setBpm} metroVolume={metroVolume} setMetroVolume={setMetroVolume} />
+              <SettingsWidget 
+                bpm={bpm} setBpm={setBpm} 
+                metroVolume={metroVolume} setMetroVolume={setMetroVolume} 
+                backingVolume={backingVolume} setBackingVolume={setBackingVolume}
+                hasBackingTrack={!!backingTrack}
+              />
               <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase !== 'idle'} getToken={getToken} />
               {backingTrack && <audio ref={backingAudioRef} src={backingTrack.audio_url} preload="auto" style={{display: 'none'}} />}
               <LatestStatsWidget result={latestResult} />
@@ -732,6 +751,8 @@ export default function App() {
                  <div className="widget-title" style={{margin: 0}}>Guided Practice History</div>
                </div>
                <div className="session-history-container">
+                  <PerformanceChart sessions={sessionHistory} />
+                  
                   {sessionHistory.length === 0 && (
                     <div className="empty-state">
                       Record a take to track your progress and receive AI feedback.
