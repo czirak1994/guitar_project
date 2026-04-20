@@ -81,3 +81,8 @@ def stripe_webhook():
         pass # Optional for simple MVP
 
     return jsonify(success=True)
+
+
+@payments_bp.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook_alias():
+    return stripe_webhook()
