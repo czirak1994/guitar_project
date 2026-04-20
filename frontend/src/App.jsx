@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
 import PerformanceChart from './PerformanceChart'
+import YouTube from 'react-youtube'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import './App.css'
 
@@ -338,39 +339,46 @@ function LatestStatsWidget({ result }) {
   )
 }
 
-function YoutubeWidget({ backingTrack, setBackingTrack, disabled, getToken }) {
+function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef }) {
   const [url, setUrl] = useState("")
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const handleLoad = async () => {
-    if (!url) return;
-    setLoading(true); setError("")
-    try {
-      const jwt = await getToken();
-      const { data } = await axios.post('/api/yt/extract', { url }, { headers: { Authorization: `Bearer ${jwt}` } });
-      setBackingTrack(data)
-    } catch(e) {
-      setError("Failed to load track. Ensure the URL is valid.")
-    } finally {
-      setLoading(false)
+  const extractVideoId = (u) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = u.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  }
+
+  const handleLoad = () => {
+    const id = extractVideoId(url);
+    if (id) {
+      setBackingTrack({ url, videoId: id });
+      setError("");
+    } else {
+      setError("Invalid YouTube URL");
     }
   }
 
+  const onReady = (event) => {
+    playerRef.current = event.target;
+  };
+
   return (
-    <div className="widget" style={{paddingBottom: '24px'}}>
-      <div className="widget-title">YouTube Backing Track</div>
+    <div className="widget" style={{paddingBottom: '16px'}}>
+      <div className="widget-title">YouTube Jam Studio</div>
       {backingTrack ? (
-         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-            <div style={{color: 'var(--accent)', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%'}}>
-               🎵 {backingTrack.title}
-            </div>
-            <button className="btn" style={{padding: '4px 8px'}} onClick={() => setBackingTrack(null)} disabled={disabled}>Clear</button>
+         <div className="yt-embed-container">
+            <YouTube 
+              videoId={backingTrack.videoId} 
+              opts={{ height: '180', width: '100%', playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1 } }}
+              onReady={onReady}
+            />
+            <button className="btn" style={{marginTop: 8, width: '100%'}} onClick={() => { setBackingTrack(null); playerRef.current = null; }} disabled={disabled}>Change Track</button>
          </div>
       ) : (
          <div className="controls-grid" style={{gridTemplateColumns: '1fr auto', gap: 8}}>
-            <input className="input-field" placeholder="Paste YouTube URL..." value={url} onChange={e=>setUrl(e.target.value)} disabled={disabled || loading}/>
-            <button className="btn" onClick={handleLoad} disabled={disabled || loading || !url}>{loading ? '...' : 'Load'}</button>
+            <input className="input-field" placeholder="Paste YouTube URL..." value={url} onChange={e=>setUrl(e.target.value)} disabled={disabled}/>
+            <button className="btn" onClick={handleLoad} disabled={disabled || !url}>Load</button>
          </div>
       )}
       {error && <div style={{color: 'var(--red)', fontSize: '0.8rem', marginTop: '8px'}}>{error}</div>}
@@ -442,7 +450,7 @@ export default function App() {
   const [pendingAudio, setPendingAudio] = useState(null)
   const [backingTrack, setBackingTrack] = useState(null)
   
-  const backingAudioRef = useRef(null)
+  const playerRef = useRef(null)
   
   const [tunerActive, setTunerActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
@@ -454,8 +462,8 @@ export default function App() {
   const historyEndRef = useRef(null)
 
   useEffect(() => {
-    if (backingAudioRef.current) {
-       backingAudioRef.current.volume = backingVolume;
+    if (playerRef.current) {
+        playerRef.current.setVolume(backingVolume * 100);
     }
   }, [backingVolume])
 
@@ -540,9 +548,9 @@ export default function App() {
       processor.connect(audioCtx.destination)
       
       setPhase('recording')
-      if (backingTrack && backingAudioRef.current) {
-          backingAudioRef.current.currentTime = 0;
-          backingAudioRef.current.play().catch(e => console.error(e));
+      if (backingTrack && playerRef.current) {
+          playerRef.current.seekTo(0);
+          playerRef.current.playVideo();
       }
       
       recordingRef.current = {
@@ -550,7 +558,7 @@ export default function App() {
         stop: async () => {
             if (!recordingRef.current.active) return
             recordingRef.current.active = false
-            if (backingTrack && backingAudioRef.current) backingAudioRef.current.pause();
+            if (backingTrack && playerRef.current) playerRef.current.pauseVideo();
             
             processor.disconnect()
             source.disconnect()
@@ -597,7 +605,7 @@ export default function App() {
     const formData = new FormData()
     formData.append('file', pendingAudio.blob, 'recording.wav')
     formData.append('bpm', bpm)
-    if (backingTrack) formData.append('backing_track_url', backingTrack.audio_url)
+    if (backingTrack) formData.append('backing_track_url', backingTrack.url)
     
     try {
         const jwt = await getToken()
@@ -740,8 +748,7 @@ export default function App() {
                 backingVolume={backingVolume} setBackingVolume={setBackingVolume}
                 hasBackingTrack={!!backingTrack}
               />
-              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase !== 'idle'} getToken={getToken} />
-              {backingTrack && <audio ref={backingAudioRef} src={backingTrack.audio_url} preload="auto" style={{display: 'none'}} />}
+              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase !== 'idle'} playerRef={playerRef} />
               <LatestStatsWidget result={latestResult} />
             </div>
 

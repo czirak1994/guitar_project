@@ -183,21 +183,14 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             db.session.commit()
             
             # Start Async AI
-            def run_async_ai(app_clone, sess_id, wave_path, cfg, rep, cxt, bt_url):
+            def run_async_ai(app_clone, sess_id, wave_path, cfg, rep, cxt, yt_url):
                 with app_clone.app_context():
-                    bt_path = None
-                    if bt_url and bt_url.startswith('/api/audio/'):
-                        bt_filename = bt_url.split('/')[-1]
-                        potential_path = os.path.join(os.environ.get("TEMP", "/tmp"), bt_filename)
-                        if os.path.exists(potential_path):
-                            bt_path = potential_path
-                            print(f"[Async] Found backing track at {bt_path}")
-
                     try:
                         from feedback.ai_coach import AICoach
                         coach = AICoach(cfg.ai)
                         if cfg.ai.enabled:
-                            ai_advice = coach.evaluate_audio(wave_path, rep, cfg.analysis.bpm, cxt, bt_path)
+                            # Pass yt_url directly to Gemini native support
+                            ai_advice = coach.evaluate_audio(wave_path, rep, cfg.analysis.bpm, cxt, yt_url)
                         else:
                             ai_advice = coach._fallback(rep)
                         
@@ -220,6 +213,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                             pass
 
             app_clone = app
+            # backing_track_url is now the raw YouTube URL from the frontend
             t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
             t.start()
 
@@ -260,26 +254,6 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "bpm": session.bpm,
             "ai_advice": advice
         })
-
-    @app.route("/api/yt/extract", methods=["POST"])
-    @require_auth
-    def extract_yt():
-        url = request.json.get("url")
-        if not url: return jsonify({"error": "URL required"}), 400
-        
-        try:
-            from api.yt import get_youtube_audio
-            temp_dir = os.environ.get("TEMP", "/tmp")
-            res = get_youtube_audio(url, temp_dir)
-            filename = os.path.basename(res["filepath"])
-            return jsonify({"audio_url": f"/api/audio/{filename}", "title": res["title"]})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/audio/<filename>", methods=["GET"])
-    def serve_audio(filename):
-        temp_dir = os.environ.get("TEMP", "/tmp")
-        return send_from_directory(temp_dir, filename)
 
     # ── Serve React build (production) ───────────────────────────────────────
     if static_dir:
