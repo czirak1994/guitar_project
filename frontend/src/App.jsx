@@ -4,15 +4,17 @@ import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/c
 import './App.css'
 
 // ── Web Audio Metronome ───────────────────────────────────────────────────────
-function useMetronome(bpm, enabled) {
+function useMetronome(bpm, enabled, masterVolume = 0.5) {
   const ctxRef      = useRef(null)
   const nextTickRef = useRef(0)
   const beatRef     = useRef(0)
   const timerRef    = useRef(null)
   const bpmRef      = useRef(bpm)
+  const volumeRef   = useRef(masterVolume)
   const [beat, setBeat] = useState(-1)
 
   useEffect(() => { bpmRef.current = bpm }, [bpm])
+  useEffect(() => { volumeRef.current = masterVolume }, [masterVolume])
 
   useEffect(() => {
     if (!enabled) {
@@ -38,7 +40,7 @@ function useMetronome(bpm, enabled) {
         const t = nextTickRef.current
         const isAccent = beatRef.current === 0
         const freq = isAccent ? 1760 : 880
-        const gain = isAccent ? 0.55 : 0.35
+        const gain = (isAccent ? 0.55 : 0.35) * volumeRef.current
         const dur  = isAccent ? 0.06 : 0.04
 
         const osc = ctx.createOscillator()
@@ -268,7 +270,7 @@ function TunerWidget({ active, onToggle, disabled }) {
   )
 }
 
-function SettingsWidget({ bpm, setBpm }) {
+function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume }) {
   return (
     <div className="widget">
       <div className="widget-title">Engine Parameters</div>
@@ -276,6 +278,10 @@ function SettingsWidget({ bpm, setBpm }) {
         <div className="field">
           <label>Tempo (BPM)</label>
           <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Metronome Vol</label>
+          <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
         </div>
       </div>
     </div>
@@ -378,6 +384,7 @@ function OnboardingModal({ isOpen, onSubmit }) {
 export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const [bpm, setBpm] = useState(120)
+  const [metroVolume, setMetroVolume] = useState(0.5)
   
   const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | analyzing | paywall
   const [countdown, setCountdown] = useState(0)
@@ -389,7 +396,7 @@ export default function App() {
   const [tunerActive, setTunerActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
   
-  const beat = useMetronome(bpm, phase === 'recording' && !metroMuted)
+  const beat = useMetronome(bpm, phase === 'recording' && !metroMuted, metroVolume)
   
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
@@ -640,7 +647,7 @@ export default function App() {
               </div>
 
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
-              <SettingsWidget bpm={bpm} setBpm={setBpm} />
+              <SettingsWidget bpm={bpm} setBpm={setBpm} metroVolume={metroVolume} setMetroVolume={setMetroVolume} />
               <LatestStatsWidget result={latestResult} />
             </div>
 

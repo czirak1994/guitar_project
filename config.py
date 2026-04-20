@@ -40,7 +40,7 @@ class AnalysisConfig:
     bpm: float = 120.0
     timing_tolerance_ms: float = 50.0   # within this = "on time"
     pitch_tolerance_cents: float = 50.0  # within this = "correct note"
-    weak_dynamics_db: float = -35.0      # below this = "weak dynamics"
+    weak_dynamics_db: float = -45.0      # below this = "weak dynamics"
     timing_unstable_std_ms: float = 30.0 # std dev above this = "unstable"
 
 import os
