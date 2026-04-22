@@ -154,15 +154,21 @@ Output exact JSON strictly conforming to this schema:
 
             from google.genai import types
 
-            contents_list = [types.Part(text=prompt)]
-            
+            prompt_parts = [prompt]
             if youtube_url:
-                 print(f"[AICoach] Injecting YouTube Context Source: {youtube_url}")
-                 # Gemini 1.5 Pro natively supports YouTube URLs in the FileData URI
-                 contents_list.append(types.Part(file_data=types.FileData(file_uri=youtube_url)))
-            
-            # Explicitly set mime_type for audio to avoid ambiguity
-            contents_list.append(types.Part(file_data=types.FileData(file_uri=audio_file.uri, mime_type="audio/wav")))
+                print(f"[AICoach] Adding YouTube URL as text context: {youtube_url}")
+                prompt_parts.append(
+                    "BACKING TRACK CONTEXT URL (reference only, not a file input): "
+                    f"{youtube_url}\n"
+                    "If this link is not usable, ignore it and analyze only the uploaded WAV plus DSP data."
+                )
+
+            combined_prompt = "\n\n".join(prompt_parts)
+
+            contents_list = [
+                combined_prompt,
+                audio_file,
+            ]
             
             print("[AICoach] Generating advice...")
             stage = "generation"
