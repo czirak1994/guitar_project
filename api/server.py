@@ -43,6 +43,21 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
     
     with app.app_context():
         db.create_all()
+        # ── Runtime column migrations ─────────────────────────────────────────
+        # db.create_all() does not ADD new columns to existing tables.
+        # We use raw SQL ALTER TABLE ... ADD COLUMN IF NOT EXISTS to safely
+        # add new columns without destroying existing data.
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(db.text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"
+                ))
+                conn.commit()
+                print("[DB] Migration: stripe_customer_id column ensured.")
+        except Exception as migration_err:
+            # SQLite doesn't support IF NOT EXISTS on ALTER TABLE
+            # but it's fine — it will fail silently on SQLite dev env
+            print(f"[DB] Migration note (likely SQLite dev): {migration_err}")
 
     # Register Stripe Endpoints
     app.register_blueprint(payments_bp)

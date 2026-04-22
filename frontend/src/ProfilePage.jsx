@@ -42,6 +42,19 @@ export default function ProfilePage() {
     })
   }, [isLoaded, isSignedIn, getToken, navigate])
 
+  // Fix bfcache: when user presses Back from Stripe checkout,
+  // the browser may restore a cached page with stale loading state.
+  useEffect(() => {
+    const handlePageShow = (e) => {
+      if (e.persisted) {
+        setUpgradeLoading(false)
+        setPortalLoading(false)
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  }, [])
+
   const handleSave = async () => {
     setSaving(true)
     setSaved(false)
