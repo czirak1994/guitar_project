@@ -305,13 +305,23 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         })
 
     # ── Serve React build (production) ───────────────────────────────────────
-    if static_dir:
-        @app.route("/", defaults={"path": ""})
-        @app.route("/<path:path>")
-        def serve_react(path):
-            full = os.path.join(static_dir, path)
+    # Always register this catch-all so that React Router (HashRouter or BrowserRouter)
+    # refreshes on any sub-route never cause a 404 from Flask.
+    _static = static_dir  # capture for closure
+
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def serve_react(path):
+        # Never intercept API calls (safety net)
+        if path and path.startswith("api/"):
+            from flask import abort
+            abort(404)
+        if _static:
+            full = os.path.join(_static, path)
             if path and os.path.exists(full):
-                return send_from_directory(static_dir, path)
-            return send_from_directory(static_dir, "index.html")
+                return send_from_directory(_static, path)
+            return send_from_directory(_static, "index.html")
+        # Dev mode without built frontend — return helpful message
+        return jsonify({"message": "API running. Start the Vite dev server separately (npm run dev in frontend/)."}), 200
 
     return app

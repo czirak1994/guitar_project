@@ -42,11 +42,12 @@
 html, body, #root {
   height: 100%;
   width: 100%;
+  /* Studio room background image with dark overlay */
   background:
-    radial-gradient(ellipse at 15% 50%, rgba(180, 120, 40, 0.07) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% 20%, rgba(120, 80, 30, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 100%, rgba(100, 60, 20, 0.08) 0%, transparent 60%),
-    var(--bg-deep);
+    radial-gradient(ellipse at 15% 50%, rgba(180, 120, 40, 0.18) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 20%, rgba(120, 80, 30, 0.12) 0%, transparent 50%),
+    linear-gradient(to bottom, rgba(8, 7, 5, 0.82) 0%, rgba(8, 7, 5, 0.88) 100%),
+    url('/studio_bg.png') center center / cover no-repeat fixed;
   color: var(--text-1);
   font-family: 'Inter', -apple-system, sans-serif;
   overflow: hidden;
@@ -122,16 +123,16 @@ html, body, #root {
 /* ── App Header ─────────────────────────────────── */
 .app-header {
   height: 52px;
-  background: rgba(16, 12, 8, 0.98);
+  background: rgba(8, 6, 4, 0.88);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
   flex-shrink: 0;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.4), 0 1px 0 var(--border-glow);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.5), 0 1px 0 var(--border-glow);
   z-index: 10;
 }
 
@@ -186,7 +187,9 @@ html, body, #root {
   min-width: 380px;
   max-width: 560px;
   border-right: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: rgba(16, 12, 8, 0.78);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -194,7 +197,9 @@ html, body, #root {
 
 .session-panel {
   flex: 1;
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   flex-direction: column;
 }

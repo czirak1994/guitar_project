@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { HashRouter, Routes, Route } from 'react-router-dom'
 import { ClerkProvider } from '@clerk/clerk-react'
 import App from './App.jsx'
 import ProfilePage from './ProfilePage.jsx'
@@ -14,11 +14,11 @@ import { createRoot } from 'react-dom/client'
 
 createRoot(document.getElementById('root')).render(
   <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/profile" element={<ProfilePage />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   </ClerkProvider>
 )
