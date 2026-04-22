@@ -524,6 +524,21 @@ export default function App() {
   const [bpm, setBpm] = useState(120)
   const [metroVolume, setMetroVolume] = useState(0.5)
   const [backingVolume, setBackingVolume] = useState(0.5)
+
+  // Detect Stripe redirect params (?success=true / ?canceled=true)
+  const stripeParams = new URLSearchParams(window.location.search)
+  const [stripeNotice, setStripeNotice] = useState(
+    stripeParams.get('success') === 'true' ? 'success' :
+    stripeParams.get('canceled') === 'true' ? 'canceled' : null
+  )
+  useEffect(() => {
+    if (stripeNotice) {
+      // Clean the URL without reloading
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash.split('?')[0])
+      const t = setTimeout(() => setStripeNotice(null), 6000)
+      return () => clearTimeout(t)
+    }
+  }, [stripeNotice])
   
   const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | analyzing | paywall
   const [countdown, setCountdown] = useState(0)
@@ -787,6 +802,28 @@ export default function App() {
               <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
             </div>
           </header>
+
+          {/* Stripe redirect notice */}
+          {stripeNotice && (
+            <div style={{
+              background: stripeNotice === 'success' ? 'rgba(76, 175, 106, 0.12)' : 'rgba(180, 140, 80, 0.12)',
+              border: `1px solid ${stripeNotice === 'success' ? 'rgba(76,175,106,0.3)' : 'rgba(180,140,80,0.3)'}`,
+              color: stripeNotice === 'success' ? 'var(--green)' : 'var(--text-2)',
+              padding: '10px 20px',
+              fontSize: '0.84rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+            }}>
+              <span>
+                {stripeNotice === 'success'
+                  ? '✓ Upgrade successful! Your account is now PRO.'
+                  : 'Checkout cancelled — you remain on the Free plan.'}
+              </span>
+              <button onClick={() => setStripeNotice(null)} style={{ background:'none', border:'none', color:'inherit', cursor:'pointer', fontSize:'1rem', padding:'0 4px' }}>×</button>
+            </div>
+          )}
 
           <div className="workspace">
             {/* Left Panel: Controls */}

@@ -39,14 +39,14 @@ def create_checkout_session():
             payment_method_types=['card'],
             line_items=[
                 {
-                    # Provide the exact Price ID (e.g. pr_1234) of the product you have created
                     'price': os.getenv("STRIPE_PRO_PRICE_ID", "price_12345"),
                     'quantity': 1,
                 },
             ],
             mode='subscription',
-            success_url=f"{base_url}/?success=true",
-            cancel_url=f"{base_url}/?canceled=true",
+            # HashRouter uses /#/ — params before the hash are visible to the server
+            success_url=f"{base_url}/?success=true#/",
+            cancel_url=f"{base_url}/?canceled=true#/",
             metadata={
                 "user_id": user_id
             }
