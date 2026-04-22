@@ -27,6 +27,15 @@ from auth import require_auth
 from flask import g
 from payments import payments_bp
 
+
+def _normalize_ai_payload(ai_advice: dict | None) -> tuple[dict | None, dict | None]:
+    if not isinstance(ai_advice, dict):
+        return ai_advice, None
+
+    payload = dict(ai_advice)
+    meta = payload.pop("_meta", None)
+    return payload, meta if isinstance(meta, dict) else None
+
 def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
     app = Flask(__name__, static_folder=static_dir, static_url_path="/")
     CORS(app)  # allow Vite dev server (localhost:5173)
@@ -228,7 +237,15 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 from feedback.ai_coach import AICoach
                 coach = AICoach(config.ai)
                 silent_advice = coach._silence_fallback(report)
-                fb = AIFeedback(session_id=new_session.id, detailed_feedback=json.dumps(silent_advice))
+                advice_payload, advice_meta = _normalize_ai_payload(silent_advice)
+                fb = AIFeedback(
+                    session_id=new_session.id,
+                    summary=(advice_payload or {}).get("summary"),
+                    detailed_feedback=json.dumps({
+                        "advice": advice_payload,
+                        "meta": advice_meta,
+                    }),
+                )
                 db.session.add(fb)
             
             metrics = PerformanceMetric(
@@ -255,11 +272,20 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                             ai_advice = coach.evaluate_audio(wave_path, rep, cfg.analysis.bpm, cxt, yt_url)
                         else:
                             ai_advice = coach._fallback(rep)
+
+                        advice_payload, advice_meta = _normalize_ai_payload(ai_advice)
                         
                         s = Session.query.get(sess_id)
                         if s:
                             s.ai_status = 'completed'
-                            fb = AIFeedback(session_id=sess_id, detailed_feedback=json.dumps(ai_advice))
+                            fb = AIFeedback(
+                                session_id=sess_id,
+                                summary=(advice_payload or {}).get("summary"),
+                                detailed_feedback=json.dumps({
+                                    "advice": advice_payload,
+                                    "meta": advice_meta,
+                                }),
+                            )
                             db.session.add(fb)
                             db.session.commit()
                     except Exception as e:
@@ -279,6 +305,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 app_clone = app
                 # backing_track_url is now the raw YouTube URL from the frontend
                 t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
+                t.daemon = True
                 t.start()
 
             return jsonify({
@@ -305,9 +332,15 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         ai_fb = session.ai_feedback
         
         advice = None
+        ai_meta = None
         if ai_fb and ai_fb.detailed_feedback:
             try:
-                advice = json.loads(ai_fb.detailed_feedback)
+                stored_feedback = json.loads(ai_fb.detailed_feedback)
+                if isinstance(stored_feedback, dict) and "advice" in stored_feedback:
+                    advice = stored_feedback.get("advice")
+                    ai_meta = stored_feedback.get("meta")
+                else:
+                    advice = stored_feedback
             except Exception:
                 pass
 
@@ -316,7 +349,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "ai_status": session.ai_status,
             "accuracy_pct": metrics.pitch_accuracy if metrics else 0,
             "bpm": session.bpm,
-            "ai_advice": advice
+            "ai_advice": advice,
+            "ai_meta": ai_meta,
         })
 
     # ── Serve React build (production) ───────────────────────────────────────

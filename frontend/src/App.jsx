@@ -6,6 +6,9 @@ import YouTube from 'react-youtube'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import './App.css'
 
+const AI_POLL_INTERVAL_MS = 3000
+const AI_POLL_TIMEOUT_MS = 90000
+
 // ── Web Audio Metronome ───────────────────────────────────────────────────────
 function useMetronome(bpm, enabled, masterVolume = 0.5) {
   const ctxRef      = useRef(null)
@@ -681,18 +684,37 @@ export default function App() {
       }
   }
 
-  const pollAI = (sessionId, jwt) => {
+    const pollAI = (sessionId, jwt) => {
+      const startedAt = Date.now()
       const timer = setInterval(async () => {
           try {
+          if (Date.now() - startedAt > AI_POLL_TIMEOUT_MS) {
+            clearInterval(timer)
+            setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? {
+            ...s,
+            ai_status: 'failed',
+            ai_meta: {
+              reason: 'AI analysis timed out before the server returned a result.',
+              stage: 'timeout',
+              uploaded_to_gemini: null,
+            },
+            } : s))
+            return
+          }
               const { data } = await axios.get(`/api/session/${sessionId}`, { headers: { Authorization: `Bearer ${jwt}` } });
               if (data.ai_status === 'completed' || data.ai_status === 'failed') {
                   clearInterval(timer);
-                  setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? { ...s, ai_status: data.ai_status, ai_advice: data.ai_advice } : s));
+            setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? {
+            ...s,
+            ai_status: data.ai_status,
+            ai_advice: data.ai_advice,
+            ai_meta: data.ai_meta,
+            } : s));
               }
           } catch(e) {
               clearInterval(timer);
           }
-      }, 3000);
+      }, AI_POLL_INTERVAL_MS);
   }
 
   const handleAnalyzeTake = async () => {
@@ -720,6 +742,7 @@ export default function App() {
           backend_id: data.session_id,
           time: new Date().toLocaleTimeString(),
           ai_status: data.status === 'processing_ai' ? 'pending' : 'completed',
+          ai_meta: null,
           ...data
         }
 
@@ -798,6 +821,7 @@ export default function App() {
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
+              <a href="mailto:tonesense@tonesense.ai" className="header-link">Feedback</a>
               <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
               <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
             </div>
@@ -909,11 +933,23 @@ export default function App() {
                            </div>
                        )}
                        {item.ai_status === 'failed' && (
-                           <div className="ai-feedback-box" style={{color: 'var(--red)', fontSize: '0.9rem'}}>AI Analysis processing failed. Please try again.</div>
+                           <div className="ai-feedback-box" style={{color: 'var(--red)', fontSize: '0.9rem'}}>
+                             AI analysis failed.
+                             {item.ai_meta?.reason ? ` ${item.ai_meta.reason}` : ' Please try again.'}
+                           </div>
                        )}
                        {item.ai_status !== 'pending' && item.ai_status !== 'failed' && item.ai_advice && typeof item.ai_advice === 'object' && (
                           <div className="ai-feedback-box">
                              <div className="ai-feedback-header">Performance Review</div>
+                             {item.ai_meta?.used_fallback && (
+                               <div style={{marginBottom: 10, padding: '8px 10px', background: 'rgba(180, 140, 80, 0.12)', border: '1px solid rgba(180, 140, 80, 0.28)', borderRadius: 6, color: 'var(--text-2)', fontSize: '0.82rem'}}>
+                                 {item.ai_meta.uploaded_to_gemini === true
+                                   ? 'The WAV reached Gemini, but the AI response fell back to local guidance.'
+                                   : 'The WAV did not complete the Gemini pipeline, so local fallback guidance was shown instead.'}
+                                 {item.ai_meta.stage ? ` Stage: ${item.ai_meta.stage}.` : ''}
+                                 {item.ai_meta.reason ? ` Reason: ${item.ai_meta.reason}` : ''}
+                               </div>
+                             )}
                              <div className="ai-summary">{item.ai_advice.summary}</div>
                              
                              <div className="ai-details-grid tonesense-badges" style={{display: 'flex', gap: '8px', flexDirection: 'row'}}>
@@ -952,6 +988,11 @@ export default function App() {
             getToken={getToken}
           />
 
+          <footer className="app-footer">
+            <span>© 2024 ToneSense AI Coach</span>
+            <span className="footer-separator">•</span>
+            <a href="mailto:tonesense@tonesense.ai">tonesense@tonesense.ai</a>
+          </footer>
         </div>
       </SignedIn>
     </>

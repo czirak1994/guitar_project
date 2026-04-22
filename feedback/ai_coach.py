@@ -69,12 +69,50 @@ Output exact JSON strictly conforming to this schema:
     def is_available(self) -> bool:
         return self._client is not None
 
+    def _build_meta(
+        self,
+        *,
+        used_fallback: bool,
+        stage: str,
+        reason: str | None = None,
+        uploaded_to_gemini: bool = False,
+        youtube_context: bool = False,
+    ) -> dict:
+        return {
+            "provider": "gemini",
+            "used_fallback": used_fallback,
+            "stage": stage,
+            "reason": reason,
+            "uploaded_to_gemini": uploaded_to_gemini,
+            "youtube_context": youtube_context,
+            "model": self.config.model,
+        }
+
+    def _with_meta(self, payload: dict, meta: dict) -> dict:
+        result = dict(payload)
+        result["_meta"] = meta
+        return result
+
     def evaluate_audio(self, wav_path: str, feedback_report_dict: dict, bpm: float = 120.0, ai_context: dict = None, youtube_url: str = None) -> dict:
         if ai_context is None:
             ai_context = {}
 
+        stage = "init"
+        uploaded_to_gemini = False
+        youtube_context = bool(youtube_url)
+
         if not self.is_available:
-            return self._fallback(feedback_report_dict)
+            return self._fallback(
+                feedback_report_dict,
+                reason="Gemini client unavailable.",
+                meta=self._build_meta(
+                    used_fallback=True,
+                    stage=stage,
+                    reason="Gemini client unavailable.",
+                    uploaded_to_gemini=False,
+                    youtube_context=youtube_context,
+                ),
+            )
 
         try:
             errors = feedback_report_dict.get("errors", [])
@@ -93,11 +131,14 @@ Output exact JSON strictly conforming to this schema:
                 last_pitch_accuracy=ai_context.get("last_accuracy") or "N/A"
             )
             
+            stage = "upload"
             print(f"[AICoach] Uploading audio to Gemini: {wav_path}")
             audio_file = self._client.files.upload(file=wav_path)
+            uploaded_to_gemini = True
             
             # Wait up to 30s for file to process
             wait_total = 0
+            stage = "processing"
             while audio_file.state.name == "PROCESSING" and wait_total < 30:
                 time.sleep(2)
                 wait_total += 2
@@ -124,6 +165,7 @@ Output exact JSON strictly conforming to this schema:
             contents_list.append(types.Part(file_data=types.FileData(file_uri=audio_file.uri, mime_type="audio/wav")))
             
             print("[AICoach] Generating advice...")
+            stage = "generation"
             
             for attempt in range(3):
                 try:
@@ -146,7 +188,15 @@ Output exact JSON strictly conforming to this schema:
                                 self._client.files.delete(name=audio_file.name)
                             except Exception:
                                 pass
-                            return result_data
+                            return self._with_meta(
+                                result_data,
+                                self._build_meta(
+                                    used_fallback=False,
+                                    stage="complete",
+                                    uploaded_to_gemini=uploaded_to_gemini,
+                                    youtube_context=youtube_context,
+                                ),
+                            )
                         except Exception as parse_e:
                             print(f"[AICoach] JSON Parse Error (Attempt {attempt+1}): {parse_e}")
                             if attempt == 2: raise parse_e
@@ -168,9 +218,19 @@ Output exact JSON strictly conforming to this schema:
             import traceback
             print(f"[AICoach] TOTAL FAILURE: {type(e).__name__}: {e}")
             print(traceback.format_exc())
-            return self._fallback(feedback_report_dict, reason=str(e))
+            return self._fallback(
+                feedback_report_dict,
+                reason=str(e),
+                meta=self._build_meta(
+                    used_fallback=True,
+                    stage=stage,
+                    reason=str(e),
+                    uploaded_to_gemini=uploaded_to_gemini,
+                    youtube_context=youtube_context,
+                ),
+            )
 
-    def _fallback(self, report: dict, reason: str = None) -> dict:
+    def _fallback(self, report: dict, reason: str = None, meta: dict | None = None) -> dict:
         tips = []
         messages = report.get("messages", [])
 
@@ -189,19 +249,31 @@ Output exact JSON strictly conforming to this schema:
         else:
             summary = "AI coaching unavailable for this session. Your DSP metrics are still recorded."
 
-        return {
+        payload = {
             "summary": summary,
             "detected_scale": "Not Detected",
             "detected_rhythm": "Not Detected",
             "musical_advice": "Ensure your guitar is audible in the recording. The AI needs a clear signal to analyse your playing.",
             "technical_focus": tips[0] if tips else "Keep practicing with the metronome."
         }
+        if meta is None:
+            meta = self._build_meta(
+                used_fallback=True,
+                stage="fallback",
+                reason=reason,
+            )
+        return self._with_meta(payload, meta)
 
     def _silence_fallback(self, report: dict) -> dict:
-        return {
+        return self._with_meta({
             "summary": "No guitar signal was detected in this recording.",
             "detected_scale": "N/A",
             "detected_rhythm": "N/A",
             "musical_advice": "Check your input volume and microphone connection. The AI needs to hear your playing clearly to analyze it.",
             "technical_focus": "Check cable/input gain."
-        }
+        }, self._build_meta(
+            used_fallback=True,
+            stage="silence",
+            reason="No audible guitar signal detected.",
+            uploaded_to_gemini=False,
+        ))
