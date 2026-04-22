@@ -96,12 +96,20 @@ Output exact JSON strictly conforming to this schema:
             print(f"[AICoach] Uploading audio to Gemini: {wav_path}")
             audio_file = self._client.files.upload(file=wav_path)
             
-            while audio_file.state.name == "PROCESSING":
-                time.sleep(1)
+            # Wait up to 30s for file to process
+            wait_total = 0
+            while audio_file.state.name == "PROCESSING" and wait_total < 30:
+                time.sleep(2)
+                wait_total += 2
                 audio_file = self._client.files.get(name=audio_file.name)
             
             if audio_file.state.name == "FAILED":
-                raise ValueError("Gemini failed to process the audio file.")
+                print(f"[AICoach] Gemini rejected the audio file (state=FAILED). File may be silent, too short, or corrupted.")
+                raise ValueError("Gemini rejected the audio file — likely too short or silent.")
+
+            if audio_file.state.name == "PROCESSING":
+                print(f"[AICoach] Gemini file still processing after timeout.")
+                raise ValueError("Gemini audio processing timed out.")
 
             from google.genai import types
 
@@ -157,10 +165,12 @@ Output exact JSON strictly conforming to this schema:
                     time.sleep(2)
 
         except Exception as e:
-            print(f"[AICoach] TOTAL FAILURE: {e}")
-            return self._fallback(feedback_report_dict)
+            import traceback
+            print(f"[AICoach] TOTAL FAILURE: {type(e).__name__}: {e}")
+            print(traceback.format_exc())
+            return self._fallback(feedback_report_dict, reason=str(e))
 
-    def _fallback(self, report: dict) -> dict:
+    def _fallback(self, report: dict, reason: str = None) -> dict:
         tips = []
         messages = report.get("messages", [])
 
@@ -170,12 +180,20 @@ Output exact JSON strictly conforming to this schema:
 
         if not tips:
             tips.append("Focus on improving your timing with a metronome.")
-            
+
+        # Give a more informative summary based on reason
+        if reason and "silent" in reason.lower():
+            summary = "No clear guitar signal detected — check your input level and try again."
+        elif reason and ("timed out" in reason.lower() or "rejected" in reason.lower()):
+            summary = "AI analysis could not process this take (audio too short or silent). Try a longer recording."
+        else:
+            summary = "AI coaching unavailable for this session. Your DSP metrics are still recorded."
+
         return {
-            "summary": "AI analysis was unable to complete for this take.",
+            "summary": summary,
             "detected_scale": "Not Detected",
             "detected_rhythm": "Not Detected",
-            "musical_advice": "Ensure your guitar is loud and clear for the AI to provide detailed feedback.",
+            "musical_advice": "Ensure your guitar is audible in the recording. The AI needs a clear signal to analyse your playing.",
             "technical_focus": tips[0] if tips else "Keep practicing with the metronome."
         }
 

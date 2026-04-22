@@ -15,6 +15,7 @@ class User(db.Model):
     skill_level = db.Column(db.String, nullable=True) # beginner, intermediate, advanced
     goal = db.Column(db.String, nullable=True) # rhythm, soloing, timing, technique
     language = db.Column(db.String, default="English")
+    stripe_customer_id = db.Column(db.String, nullable=True)  # Stripe Customer ID for billing portal
 
     sessions = db.relationship('Session', backref='user', lazy=True)
     learning_state = db.relationship('LearningState', backref='user', uselist=False, lazy=True)

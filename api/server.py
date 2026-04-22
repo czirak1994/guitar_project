@@ -87,8 +87,40 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "skill_level": user.skill_level,
             "goal": user.goal,
             "language": user.language,
+            "plan": user.plan,
             "streak_days": learning_state.streak_days,
             "current_focus": learning_state.current_focus
+        })
+
+    @app.route("/api/stats", methods=["GET"])
+    @require_auth
+    def get_stats():
+        """Return aggregated practice statistics for the profile page."""
+        user_id = g.user_id
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"total_sessions": 0, "best_accuracy": None, "member_since": None})
+
+        sessions = Session.query.filter_by(user_id=user_id).all()
+        total = len(sessions)
+
+        best_acc = None
+        for s in sessions:
+            if s.performance_metric and s.performance_metric.pitch_accuracy is not None:
+                v = s.performance_metric.pitch_accuracy
+                if best_acc is None or v > best_acc:
+                    best_acc = v
+
+        # Earliest session date
+        member_since = None
+        if sessions:
+            earliest = min(sessions, key=lambda s: s.timestamp)
+            member_since = earliest.timestamp.strftime("%b %Y")
+
+        return jsonify({
+            "total_sessions": total,
+            "best_accuracy": round(best_acc, 1) if best_acc is not None else None,
+            "member_since": member_since,
         })
 
     @app.route("/api/analyze", methods=["POST"])

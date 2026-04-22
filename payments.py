@@ -56,6 +56,36 @@ def create_checkout_session():
         return jsonify(error=str(e)), 500
 
 
+@payments_bp.route("/api/billing-portal", methods=["POST"])
+@require_auth
+def billing_portal():
+    """Create a Stripe Customer Portal session for subscription management."""
+    from flask import g
+    user_id = getattr(g, 'user_id', None)
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    if not user.stripe_customer_id:
+        return jsonify({"error": "No active subscription found. Please upgrade to PRO first."}), 400
+
+    try:
+        raw_url = os.getenv("FRONTEND_URL", "http://localhost:5173").strip().rstrip("/")
+        if not raw_url.startswith("http"):
+            raw_url = f"https://{raw_url}"
+
+        portal_session = stripe.billing_portal.Session.create(
+            customer=user.stripe_customer_id,
+            return_url=f"{raw_url}/profile",
+        )
+        return jsonify({"url": portal_session.url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @payments_bp.route("/api/webhook/stripe", methods=["POST"])
 def stripe_webhook():
     payload = request.data
@@ -65,31 +95,33 @@ def stripe_webhook():
         event = stripe.Webhook.construct_event(
             payload, sig_header, WEBHOOK_SECRET
         )
-    except ValueError as e:
-        # Invalid payload
+    except ValueError:
         return "Invalid payload", 400
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
+    except stripe.error.SignatureVerificationError:
         return "Invalid signature", 400
 
-    # Handle the event
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        
-        # Fulfill the purchase...
         user_id = session.get("metadata", {}).get("user_id")
-        
+
         if user_id:
             user = User.query.get(user_id)
             if user:
                 user.plan = "pro"
+                # Save Stripe customer ID for future billing portal access
+                if session.get("customer"):
+                    user.stripe_customer_id = session.get("customer")
                 db.session.commit()
-                print(f"[Stripe] Upgraded user {user_id} to PRO")
+                print(f"[Stripe] Upgraded user {user_id} to PRO, customer={user.stripe_customer_id}")
 
     elif event['type'] == 'customer.subscription.deleted':
-        # Handled when subscription is cancelled
         sub = event['data']['object']
-        # We need to map customer back to user, usually by querying customer ID
-        pass # Optional for simple MVP
+        customer_id = sub.get("customer")
+        if customer_id:
+            user = User.query.filter_by(stripe_customer_id=customer_id).first()
+            if user:
+                user.plan = "free"
+                db.session.commit()
+                print(f"[Stripe] Downgraded user {user.user_id} to FREE (subscription cancelled)")
 
     return jsonify(success=True)

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import PerformanceChart from './PerformanceChart'
 import YouTube from 'react-youtube'
@@ -275,7 +276,7 @@ function TunerWidget({ active, onToggle, disabled }) {
 function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume, backingVolume, setBackingVolume, hasBackingTrack }) {
   return (
     <div className="widget">
-      <div className="widget-title">Engine Parameters</div>
+      <div className="widget-title">Session Controls</div>
       <div className="controls-grid">
         <div className="field">
           <label>Tempo (BPM)</label>
@@ -365,7 +366,7 @@ function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef }) {
 
   return (
     <div className="widget" style={{paddingBottom: '16px'}}>
-      <div className="widget-title">YouTube Jam Studio</div>
+      <div className="widget-title">Backing Track</div>
       {backingTrack ? (
          <div className="yt-embed-container">
             <YouTube 
@@ -519,6 +520,7 @@ function OnboardingModal({ isOpen, onSubmit }) {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
+  const navigate = useNavigate()
   const [bpm, setBpm] = useState(120)
   const [metroVolume, setMetroVolume] = useState(0.5)
   const [backingVolume, setBackingVolume] = useState(0.5)
@@ -739,11 +741,15 @@ export default function App() {
     <>
       <SignedOut>
         <div className="auth-overlay">
-          <h1>ToneSense</h1>
-          <p>Login to access the AI analysis engine, precision metronome, and tuner.</p>
-          <SignInButton mode="modal">
-            <button className="btn" style={{padding: '12px 32px', fontSize: '1rem'}}>Access Platform</button>
-          </SignInButton>
+          <div className="auth-logo">ToneSense</div>
+          <div className="auth-tagline">AI-Powered Guitar Coach</div>
+          <div className="auth-card">
+            <h2>Welcome back</h2>
+            <p>Sign in to access your studio — AI analysis, precision tuner, and session tracking.</p>
+            <SignInButton mode="modal">
+              <button className="btn btn-accent" style={{width: '100%', padding: '11px', fontSize: '0.9rem', borderRadius: '8px'}}>Enter Studio</button>
+            </SignInButton>
+          </div>
         </div>
       </SignedOut>
       
@@ -776,7 +782,10 @@ export default function App() {
           {/* Header */}
           <header className="app-header">
             <div className="app-title">ToneSense</div>
-            <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
+            <div className="header-right">
+              <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
+              <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
+            </div>
           </header>
 
           <div className="workspace">
@@ -836,7 +845,7 @@ export default function App() {
             {/* Right Panel: Session History */}
             <div className="session-panel">
                <div className="widget" style={{borderBottom: '1px solid var(--border)', background: 'var(--bg-panel-hi)'}}>
-                 <div className="widget-title" style={{margin: 0}}>Guided Practice History</div>
+                 <div className="widget-title" style={{margin: 0}}>Session History</div>
                </div>
                <div className="session-history-container">
                   <PerformanceChart sessions={sessionHistory} />
