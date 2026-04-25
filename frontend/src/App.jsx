@@ -613,6 +613,20 @@ export default function App() {
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
+              {profile && profile.plan === 'free' && (
+                <button
+                  className="upgrade-btn"
+                  onClick={async () => {
+                    try {
+                      const jwt = await getToken()
+                      const { data } = await axios.post('/api/create-checkout-session', {}, { headers: { Authorization: `Bearer ${jwt}` } })
+                      window.location.href = data.url
+                    } catch { /* silent */ }
+                  }}
+                >
+                  ⚡ Upgrade to PRO
+                </button>
+              )}
               <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
               <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
             </div>
