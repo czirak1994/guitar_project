@@ -395,7 +395,275 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
   )
 }
 
-// ── ChatPanel ─────────────────────────────────────────────────────────────────
+// ── AIChatBubble (internal helper) ───────────────────────────────────────────
+function AIChatBubble({ message }) {
+  if (message.status === 'analyzing') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+        <div style={{
+          maxWidth: '80%',
+          padding: '12px 16px',
+          background: 'var(--bg-deep)',
+          border: '1px solid var(--border)',
+          borderRadius: '16px 16px 16px 4px',
+          color: 'var(--text-muted)',
+          fontSize: '0.88rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}>
+          <span style={{
+            display: 'inline-block',
+            width: 14,
+            height: 14,
+            border: '2px solid var(--accent)',
+            borderTopColor: 'transparent',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            flexShrink: 0,
+          }} />
+          Analyzing your recording…
+        </div>
+      </div>
+    )
+  }
+
+  const d = message.ai_data
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+      <div style={{
+        maxWidth: '80%',
+        padding: '14px 18px',
+        background: 'var(--bg-deep)',
+        border: message.status === 'error' ? '1px solid rgba(220,50,50,0.4)' : '1px solid var(--border)',
+        borderRadius: '16px 16px 16px 4px',
+        fontSize: '0.88rem',
+        lineHeight: 1.65,
+        color: message.status === 'error' ? 'var(--red)' : 'var(--text-1)',
+      }}>
+        {d ? (
+          <>
+            {d.diagnosis && (
+              <p style={{ marginTop: 0, marginBottom: 12 }}>{d.diagnosis}</p>
+            )}
+            {d.specific_issues?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Issues</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {d.specific_issues.map((issue, i) => (
+                    <li key={i} style={{ marginBottom: 3 }}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {d.actionable_fixes?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Fixes</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {d.actionable_fixes.map((fix, i) => (
+                    <li key={i} style={{ marginBottom: 3 }}>{fix}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {d.focused_exercise && d.focused_exercise !== 'null' && (
+              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,178,50,0.07)', border: '1px solid rgba(255,178,50,0.2)', borderRadius: 8 }}>
+                <div style={{ fontWeight: 600, color: 'var(--yellow)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Exercise</div>
+                <div>{d.focused_exercise}</div>
+              </div>
+            )}
+            {d.follow_up_question && (
+              <div style={{ marginTop: 12, fontStyle: 'italic', color: 'var(--text-2)', fontSize: '0.86rem' }}>
+                {d.follow_up_question}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── ConversationalChat ────────────────────────────────────────────────────────
+export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend }) {
+  const [text, setText] = useState('')
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const isRecording = phase === 'recording'
+  const isBusy = phase === 'analyzing' || phase === 'countdown'
+  const hasAudio = !!pendingAudio
+  const canSend = (text.trim() || hasAudio) && !isRecording && !isBusy
+
+  const handleSend = () => {
+    if (!canSend) return
+    onSend(text.trim(), pendingAudio || null)
+    setText('')
+  }
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
+      {/* Chat header */}
+      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-1)' }}>ToneSense AI</span>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>guitar coach</span>
+      </div>
+
+      {/* Messages */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        padding: '16px 20px',
+      }}>
+        {messages.length === 0 && (
+          <div style={{
+            margin: 'auto',
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            fontSize: '0.9rem',
+            lineHeight: 1.7,
+            maxWidth: 340,
+            paddingTop: 40,
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: 12 }}>🎸</div>
+            <div>Record your playing or ask a question to get started.</div>
+            <div style={{ fontSize: '0.8rem', marginTop: 8, color: 'var(--text-3)' }}>
+              Hit the mic button below, or just type something.
+            </div>
+          </div>
+        )}
+
+        {messages.map((m, i) => (
+          m.role === 'user' ? (
+            <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              {m.text && (
+                <div style={{
+                  maxWidth: '75%',
+                  padding: '10px 16px',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  borderRadius: '16px 16px 4px 16px',
+                  fontSize: '0.88rem',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {m.text}
+                </div>
+              )}
+              {m.audio_url && (
+                <audio src={m.audio_url} controls style={{ maxWidth: '100%', height: 36, opacity: 0.85 }} />
+              )}
+            </div>
+          ) : (
+            <AIChatBubble key={m.id || i} message={m} />
+          )
+        ))}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input area */}
+      <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px', flexShrink: 0 }}>
+        {/* Audio attachment pill */}
+        {hasAudio && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 8,
+            padding: '6px 12px',
+            background: 'var(--bg-deep)',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+          }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-2)', flex: 1 }}>
+              🎙 Recording ready · {elapsed.toFixed(1)}s
+            </span>
+            <audio src={pendingAudio.url} controls style={{ height: 28 }} />
+            <button
+              onClick={onDiscardAudio}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.1rem', padding: '0 4px', lineHeight: 1 }}
+              title="Discard recording"
+            >×</button>
+          </div>
+        )}
+
+        {/* Recording indicator */}
+        {isRecording && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.82rem', color: 'var(--red)' }}>
+            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulse 1s ease-in-out infinite' }} />
+            Recording · {elapsed.toFixed(1)}s — click stop when done
+          </div>
+        )}
+
+        {/* Input row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder={
+              isRecording ? 'Recording in progress…' :
+              hasAudio ? 'Add a note (optional) then Send…' :
+              'Ask a question or record your playing…'
+            }
+            rows={2}
+            disabled={isRecording || isBusy}
+            className="input-field"
+            style={{ flex: 1, resize: 'none', fontSize: '0.88rem' }}
+          />
+
+          {/* Mic / Stop button */}
+          <button
+            onClick={onRecord}
+            disabled={isBusy || hasAudio}
+            title={isRecording ? 'Stop recording' : 'Start recording'}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: `1px solid ${isRecording ? 'var(--red)' : 'var(--border)'}`,
+              background: isRecording ? 'rgba(220,50,50,0.12)' : 'var(--bg-deep)',
+              color: isRecording ? 'var(--red)' : 'var(--text-2)',
+              cursor: (isBusy || hasAudio) ? 'not-allowed' : 'pointer',
+              fontSize: '1.1rem',
+              lineHeight: 1,
+              flexShrink: 0,
+              alignSelf: 'flex-end',
+              opacity: (isBusy || hasAudio) ? 0.4 : 1,
+            }}
+          >
+            {isRecording ? '⏹' : '🎙'}
+          </button>
+
+          {/* Send button */}
+          <button
+            className="btn-primary"
+            onClick={handleSend}
+            disabled={!canSend}
+            style={{ padding: '8px 18px', alignSelf: 'flex-end', flexShrink: 0 }}
+          >
+            {isBusy ? 'Wait…' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ChatPanel (legacy, kept for reference) ────────────────────────────────────
 export function ChatPanel({ sessionId, getToken, context = {}, initialMessages = [] }) {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')

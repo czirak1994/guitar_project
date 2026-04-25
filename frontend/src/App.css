@@ -323,6 +323,22 @@ input[type="range"] {
   color: #1a0f00;
   font-weight: 700;
   letter-spacing: 0.3px;
+
+.btn-primary {
+  background: var(--accent);
+  border: none;
+  color: #1a0f00;
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
 }
 .btn-accent:hover:not(:disabled) {
   background: #FFB83A;

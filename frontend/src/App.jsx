@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, SessionHistoryPanel, DeveloperFeedbackModal, ChatPanel } from './components/AppPanels'
+import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat } from './components/AppPanels'
 import './App.css'
 
 const AI_POLL_INTERVAL_MS = 3000
@@ -298,27 +298,19 @@ export default function App() {
     }
   }, [stripeNotice])
   
-  const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | analyzing | paywall
+  const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | paywall
   const [countdown, setCountdown] = useState(0)
   const [elapsed, setElapsed] = useState(0)
-  const [sessionHistory, setSessionHistory] = useState([])
+  const [chatMessages, setChatMessages] = useState([])
+  const [activeChatSessionId, setActiveChatSessionId] = useState(null)
+  const [latestMetrics, setLatestMetrics] = useState(null)
   const [profile, setProfile] = useState(null)
   const [pendingAudio, setPendingAudio] = useState(null)
   const [backingTrack, setBackingTrack] = useState(null)
-
-  // New focused UI state
-  const [userProblem, setUserProblem] = useState('')
-  const [focusArea, setFocusArea] = useState('overall') // overall | Timing | Rhythm | Technique | Tone
+  const [focusArea, setFocusArea] = useState('overall')
   const [guitarStyle, setGuitarStyle] = useState('')
   const [scaleKey, setScaleKey] = useState('')
   const [rhythmInfo, setRhythmInfo] = useState('')
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
-  const [feedbackMessage, setFeedbackMessage] = useState('')
-  const [feedbackSessionId, setFeedbackSessionId] = useState(null)
-  const [isSendingFeedback, setIsSendingFeedback] = useState(false)
-  // Chat state
-  const [chatSessionId, setChatSessionId] = useState(null)
-  const [chatInitialMessages, setChatInitialMessages] = useState([])
   
   const playerRef = useRef(null)
   
@@ -329,7 +321,6 @@ export default function App() {
   
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
-  const historyEndRef = useRef(null)
 
   useEffect(() => {
     if (playerRef.current) {
@@ -361,14 +352,9 @@ export default function App() {
      }
   }
 
-  // Auto-scroll to latest feedback
-  useEffect(() => {
-    historyEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [sessionHistory])
-
   const handleRecord = async () => {
     if (phase === 'recording') {
-      setPhase('analyzing')
+      setPhase('idle')
       if (recordingRef.current) recordingRef.current.stop()
       return
     }
@@ -453,127 +439,149 @@ export default function App() {
       }
   }
 
-    const pollAI = (sessionId, jwt) => {
-      const startedAt = Date.now()
-      const timer = setInterval(async () => {
-          try {
-          if (Date.now() - startedAt > AI_POLL_TIMEOUT_MS) {
-            clearInterval(timer)
-            setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? {
-            ...s,
-            ai_status: 'failed',
-            ai_meta: {
-              reason: 'AI analysis timed out before the server returned a result.',
-              stage: 'timeout',
-              uploaded_to_gemini: null,
-            },
-            } : s))
-            return
+    const pollChatAI = (sessionId, jwt, aiMsgId) => {
+    const startedAt = Date.now()
+    const timer = setInterval(async () => {
+      try {
+        if (Date.now() - startedAt > AI_POLL_TIMEOUT_MS) {
+          clearInterval(timer)
+          inFlightRef.current = false
+          setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+            ...m, status: 'error', text: 'AI analysis timed out. Please try again.',
+          } : m))
+          return
+        }
+        const { data } = await axios.get(`/api/session/${sessionId}`, { headers: { Authorization: `Bearer ${jwt}` } })
+        if (data.ai_status === 'completed' || data.ai_status === 'failed') {
+          clearInterval(timer)
+          inFlightRef.current = false
+          setActiveChatSessionId(sessionId)
+          if (data.ai_status === 'completed') {
+            setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+              ...m, status: 'done', ai_data: data.ai_advice, text: null,
+            } : m))
+          } else {
+            setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+              ...m, status: 'error', text: 'AI analysis failed. Please try again.',
+            } : m))
           }
-              const { data } = await axios.get(`/api/session/${sessionId}`, { headers: { Authorization: `Bearer ${jwt}` } });
-              if (data.ai_status === 'completed' || data.ai_status === 'failed') {
-                  clearInterval(timer);
-            setSessionHistory(prev => prev.map(s => s.backend_id === sessionId ? {
-            ...s,
-            ai_status: data.ai_status,
-            ai_advice: data.ai_advice,
-            ai_meta: data.ai_meta,
-            } : s));
-            if (data.ai_status === 'completed') {
-              setChatSessionId(sessionId)
-              setChatInitialMessages([])
-            }
-              }
-          } catch(e) {
-              clearInterval(timer);
-          }
-      }, AI_POLL_INTERVAL_MS);
+        }
+      } catch (e) {
+        clearInterval(timer)
+        inFlightRef.current = false
+      }
+    }, AI_POLL_INTERVAL_MS)
   }
 
-  const handleAnalyzeTake = async () => {
-    if (!pendingAudio) return
-    setPhase('analyzing')
-    inFlightRef.current = true
-    
-    const formData = new FormData()
-    formData.append('file', pendingAudio.blob, 'recording.wav')
-    formData.append('bpm', bpm)
-    if (backingTrack) formData.append('backing_track_url', backingTrack.url)
-      // Add new focused UI parameters
-      formData.append('problem', userProblem)
-      formData.append('focus', focusArea)
-      formData.append('style', guitarStyle)
-      formData.append('scale_or_key', scaleKey)
-      formData.append('rhythm_info', rhythmInfo)
-    
+  const handleChatSend = async (text, audio) => {
+    if (!text && !audio) return
+
+    const userMsgId = `u-${Date.now()}`
+    const aiMsgId = `a-${Date.now() + 1}`
+
+    const lowerText = (text || '').toLowerCase()
+    const isFeedback = lowerText.startsWith('feedback:') || lowerText.startsWith('bug:')
+
+    const audioUrl = audio?.url || null
+    const audioBlob = audio?.blob || null
+
+    if (audio) {
+      setPendingAudio(null)
+      setPhase('idle')
+    }
+
+    setChatMessages(prev => [...prev, { id: userMsgId, role: 'user', text: text || null, audio_url: audioUrl }])
+    setChatMessages(prev => [...prev, { id: aiMsgId, role: 'assistant', status: 'analyzing', text: null, ai_data: null }])
+
     try {
-        const jwt = await getToken()
+      const jwt = await getToken()
+
+      if (isFeedback) {
+        axios.post('/api/feedback', { message: text, session_id: activeChatSessionId }, {
+          headers: { Authorization: `Bearer ${jwt}` },
+        }).catch(() => {})
+      }
+
+      if (audioBlob) {
+        inFlightRef.current = true
+        const formData = new FormData()
+        formData.append('file', audioBlob, 'recording.wav')
+        formData.append('bpm', bpm)
+        if (backingTrack) formData.append('backing_track_url', backingTrack.url)
+        if (text) formData.append('problem', text)
+        formData.append('focus', focusArea)
+        formData.append('style', guitarStyle)
+        formData.append('scale_or_key', scaleKey)
+        formData.append('rhythm_info', rhythmInfo)
+
         const { data } = await axios.post('/api/analyze', formData, {
-          headers: { Authorization: `Bearer ${jwt}` }
+          headers: { Authorization: `Bearer ${jwt}` },
         })
-        
+
         if (data.streak_days !== undefined) {
-           setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
+          setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
         }
-        
-        const newSession = {
-          id: Date.now(),
-          backend_id: data.session_id,
-          time: new Date().toLocaleTimeString(),
-          ai_status: data.status === 'processing_ai' ? 'pending' : 'completed',
-          ai_meta: null,
-          ...data
-        }
+        setLatestMetrics({
+          accuracy_pct: data.accuracy_pct,
+          on_time_ratio: data.on_time_ratio,
+          timing_error_ms: data.timing_error_ms,
+          amplitude_db: data.amplitude_db,
+          bpm,
+        })
 
-        setSessionHistory(prev => [...prev, newSession])
-        
         if (data.status === 'processing_ai') {
-            pollAI(data.session_id, jwt);
+          pollChatAI(data.session_id, jwt, aiMsgId)
+        } else {
+          inFlightRef.current = false
+          setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+            ...m, status: 'error', text: 'Recording received but no AI response. Please try again.',
+          } : m))
+        }
+      } else {
+        const history = chatMessages
+          .filter(m => m.status !== 'analyzing')
+          .map(m => ({
+            role: m.role,
+            content: m.ai_data ? (m.ai_data.diagnosis || JSON.stringify(m.ai_data)) : (m.text || ''),
+          }))
+
+        let res
+        if (activeChatSessionId) {
+          res = await axios.post(`/api/session/${activeChatSessionId}/chat`, { message: text }, {
+            headers: { Authorization: `Bearer ${jwt}` },
+          })
+        } else {
+          res = await axios.post('/api/chat', {
+            message: text,
+            history,
+            context: { focus: focusArea, style: guitarStyle, scale_or_key: scaleKey, rhythm_info: rhythmInfo },
+          }, { headers: { Authorization: `Bearer ${jwt}` } })
         }
 
-        setPhase('idle')
-        setPendingAudio(null)
-    } catch(e) {
-        if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
-          setPhase('paywall')
-        } else {
-          alert(e.response?.data?.error || e.message)
-          setPhase('idle')
-        }
-    } finally {
-        inFlightRef.current = false
+        setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+          ...m, status: 'done', text: res.data.response,
+        } : m))
+      }
+    } catch (e) {
+      if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
+        setPhase('paywall')
+        setChatMessages(prev => prev.filter(m => m.id !== aiMsgId))
+      } else {
+        setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
+          ...m, status: 'error', text: e.response?.data?.error || 'Something went wrong. Please try again.',
+        } : m))
+      }
+      inFlightRef.current = false
     }
   }
 
   const handleDiscardTake = () => {
-     if (pendingAudio?.url) URL.revokeObjectURL(pendingAudio.url)
-     setPendingAudio(null)
-     setPhase('idle')
+    if (pendingAudio?.url) URL.revokeObjectURL(pendingAudio.url)
+    setPendingAudio(null)
+    setPhase('idle')
   }
 
-  const handleFeedbackSubmit = async () => {
-    if (!feedbackMessage.trim()) return
-    setIsSendingFeedback(true)
-    try {
-      const jwt = await getToken()
-      await axios.post('/api/feedback', {
-        message: feedbackMessage.trim(),
-        session_id: feedbackSessionId,
-      }, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      })
-      setFeedbackMessage('')
-      setFeedbackSessionId(null)
-      setShowFeedbackModal(false)
-    } catch (e) {
-      alert(e.response?.data?.error || e.message || 'Could not send feedback')
-    } finally {
-      setIsSendingFeedback(false)
-    }
-  }
-
-  const latestResult = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null
-  const showOnboarding = profile && !profile.skill_level;
+  const showOnboarding = profile && !profile.skill_level
 
   return (
     <>
@@ -590,30 +598,26 @@ export default function App() {
           </div>
         </div>
       </SignedOut>
-      
+
       <SignedIn>
         <div className="app">
           <OnboardingModal isOpen={showOnboarding} onSubmit={handleOnboardingSubmit} />
 
-          {/* 3-2-1 Countdown Overlay */}
           {phase === 'countdown' && (
-             <div className="countdown-overlay">
-                <div className="countdown-number">{countdown}</div>
-                <div className="countdown-text">Get Ready...</div>
-             </div>
+            <div className="countdown-overlay">
+              <div className="countdown-number">{countdown}</div>
+              <div className="countdown-text">Get Ready…</div>
+            </div>
           )}
 
-          {/* Header */}
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
-              <button className="header-profile-btn" onClick={() => setShowFeedbackModal(true)}>Send Feedback</button>
               <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
               <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
             </div>
           </header>
 
-          {/* Stripe redirect notice */}
           {stripeNotice && (
             <div style={{
               background: stripeNotice === 'success' ? 'rgba(76, 175, 106, 0.12)' : 'rgba(180, 140, 80, 0.12)',
@@ -636,26 +640,16 @@ export default function App() {
           )}
 
           <div className="workspace">
-            {/* Left Panel: Controls */}
+            {/* Left Panel: Context & Controls */}
             <div className="controls-panel" style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}>
 
               <div className="widget" style={{ paddingBottom: '18px' }}>
-                <div className="widget-title">What do you want help with?</div>
-                <textarea
-                  className="input-field"
-                  rows={4}
-                  value={userProblem}
-                  onChange={(e) => {
-                    setUserProblem(e.target.value)
-                  }}
-                  placeholder={'e.g. My timing is inconsistent in fast alternate picking\n' +
-                    'e.g. I want to improve metal riff accuracy'}
-                  style={{ width: '100%', resize: 'vertical' }}
-                />
-                <div className="controls-grid" style={{ marginTop: 10 }}>
+                <div className="widget-title">Session Context</div>
+                <div className="controls-grid">
                   <div className="field">
                     <label>Focus</label>
                     <select value={focusArea} onChange={(e) => setFocusArea(e.target.value)}>
+                      <option value="overall">Overall</option>
                       <option value="Timing">Timing</option>
                       <option value="Rhythm">Rhythm</option>
                       <option value="Technique">Technique</option>
@@ -664,134 +658,72 @@ export default function App() {
                   </div>
                   <div className="field">
                     <label>Style</label>
-                    <input
-                      className="input-field"
-                      type="text"
-                      placeholder="e.g. Metal, Blues, Jazz"
-                      value={guitarStyle}
-                      onChange={(e) => setGuitarStyle(e.target.value)}
-                    />
+                    <input className="input-field" type="text" placeholder="e.g. Metal, Blues, Jazz" value={guitarStyle} onChange={(e) => setGuitarStyle(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label>Scale / Key <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.8rem' }}>(optional)</span></label>
-                    <input
-                      className="input-field"
-                      type="text"
-                      placeholder="e.g. A minor, C major pentatonic"
-                      value={scaleKey}
-                      onChange={(e) => setScaleKey(e.target.value)}
-                    />
+                    <label>Scale / Key <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.78rem' }}>(optional)</span></label>
+                    <input className="input-field" type="text" placeholder="e.g. A minor, C major" value={scaleKey} onChange={(e) => setScaleKey(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label>Rhythm / Tempo context <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.8rem' }}>(optional)</span></label>
-                    <input
-                      className="input-field"
-                      type="text"
-                      placeholder="e.g. 16th note groove at 90 BPM"
-                      value={rhythmInfo}
-                      onChange={(e) => setRhythmInfo(e.target.value)}
-                    />
+                    <label>Rhythm / Tempo <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.78rem' }}>(optional)</span></label>
+                    <input className="input-field" type="text" placeholder="e.g. 16th note at 90 BPM" value={rhythmInfo} onChange={(e) => setRhythmInfo(e.target.value)} />
                   </div>
                 </div>
               </div>
-              
+
               {profile && profile.skill_level && (
-                 <div className="widget dashboard-habit-widget">
-                    <div className="habit-header">
-                       <span className="habit-streak">🔥 Streak: {profile.streak_days || 0} Days</span>
-                       <span className="habit-focus-label">Current Focus</span>
-                    </div>
-                    <div className="habit-focus-text">
-                       {profile.current_focus}
-                    </div>
-                 </div>
+                <div className="widget dashboard-habit-widget">
+                  <div className="habit-header">
+                    <span className="habit-streak">🔥 Streak: {profile.streak_days || 0} Days</span>
+                    <span className="habit-focus-label">Current Focus</span>
+                  </div>
+                  <div className="habit-focus-text">{profile.current_focus}</div>
+                </div>
               )}
 
-              <div className="widget" style={{paddingBottom: '24px'}}>
-                <div className="transport-bar">
-                  <button 
-                    className={`record-btn-main ${phase}`} 
-                    onClick={handleRecord}
-                    disabled={phase === 'analyzing' || phase === 'countdown'}
-                  >
-                    <div className="rec-indicator" />
-                    {phase === 'recording' ? 'Stop Recording' : phase === 'analyzing' ? 'Analyzing' : phase === 'countdown' ? 'Wait' : 'Start Recording'}
-                  </button>
-                  <div className={`timer-display ${phase === 'recording' ? 'recording' : ''}`}>
-                     {(elapsed).toFixed(1)}s
-                  </div>
-                </div>
-
-                {phase === 'review' && pendingAudio && (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ color: 'var(--text-2)', fontSize: '0.85rem', marginBottom: 8 }}>Recording ready</div>
-                    <audio src={pendingAudio.url} controls style={{ width: '100%', marginBottom: 10 }} />
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn" onClick={handleDiscardTake}>Discard</button>
-                      <button className="btn" style={{ background: 'var(--accent-dim)', color: '#000', border: 'none', fontWeight: 600 }} onClick={handleAnalyzeTake}>
-                        Get Feedback
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="metronome-controls">
-                  <button className="btn" style={{padding: '4px 8px'}} onClick={() => setMetroMuted(m => !m)}>
-                    {metroMuted ? 'Unmute Metro' : 'Mute Metro'}
-                  </button>
+              <div className="widget" style={{ paddingBottom: '16px' }}>
+                <div className="widget-title">Metronome</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div className="metro-dots">
                     {[0, 1, 2, 3].map(i => (
                       <span key={i} className={`metro-dot ${beat === i ? (i === 0 ? 'accent' : 'active') : ''}`} />
                     ))}
                   </div>
+                  <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => setMetroMuted(m => !m)}>
+                    {metroMuted ? 'Unmute' : 'Mute'}
+                  </button>
                 </div>
               </div>
 
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
-              <SettingsWidget 
-                bpm={bpm} setBpm={setBpm} 
-                metroVolume={metroVolume} setMetroVolume={setMetroVolume} 
+              <SettingsWidget
+                bpm={bpm} setBpm={setBpm}
+                metroVolume={metroVolume} setMetroVolume={setMetroVolume}
                 backingVolume={backingVolume} setBackingVolume={setBackingVolume}
                 hasBackingTrack={!!backingTrack}
               />
-              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase !== 'idle'} playerRef={playerRef} />
-              <LatestStatsWidget result={latestResult} />
+              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} />
+              <LatestStatsWidget result={latestMetrics} />
             </div>
 
-            <SessionHistoryPanel sessionHistory={sessionHistory} historyEndRef={historyEndRef} />
-
-            <ChatPanel
-              sessionId={chatSessionId}
-              getToken={getToken}
-              initialMessages={chatInitialMessages}
-              context={{
-                problem: userProblem,
-                focus: focusArea,
-                style: guitarStyle,
-                scale_or_key: scaleKey,
-                rhythm_info: rhythmInfo,
-              }}
+            {/* Right Panel: Conversational Chat */}
+            <ConversationalChat
+              messages={chatMessages}
+              phase={phase}
+              elapsed={elapsed}
+              pendingAudio={pendingAudio}
+              beat={beat}
+              onRecord={handleRecord}
+              onDiscardAudio={handleDiscardTake}
+              onSend={handleChatSend}
             />
           </div>
-          
+
           <PaywallModal
             isOpen={phase === 'paywall'}
             onContinueFree={() => setPhase('idle')}
             getToken={getToken}
           />
-
-          <DeveloperFeedbackModal
-            isOpen={showFeedbackModal}
-            message={feedbackMessage}
-            setMessage={setFeedbackMessage}
-            onClose={() => setShowFeedbackModal(false)}
-            onSend={handleFeedbackSubmit}
-            sending={isSendingFeedback}
-          />
-
-          <div style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: '0.78rem', padding: '8px 0 14px' }}>
-            This is an experimental AI tool. Feedback may not always be accurate.
-          </div>
         </div>
       </SignedIn>
     </>
