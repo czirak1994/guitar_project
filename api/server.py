@@ -60,8 +60,17 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 conn.execute(db.text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"
                 ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS problem VARCHAR"
+                ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS focus VARCHAR"
+                ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS style VARCHAR"
+                ))
                 conn.commit()
-                print("[DB] Migration: stripe_customer_id column ensured.")
+                print("[DB] Migration: stripe_customer_id, problem, focus, style columns ensured.")
         except Exception as migration_err:
             # SQLite doesn't support IF NOT EXISTS on ALTER TABLE
             # but it's fine — it will fail silently on SQLite dev env
