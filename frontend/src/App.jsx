@@ -726,6 +726,10 @@ export default function App() {
     formData.append('file', pendingAudio.blob, 'recording.wav')
     formData.append('bpm', bpm)
     if (backingTrack) formData.append('backing_track_url', backingTrack.url)
+      // Add new focused UI parameters
+      formData.append('problem', userProblem)
+      formData.append('focus', focusArea)
+      formData.append('style', guitarStyle)
     
     try {
         const jwt = await getToken()
@@ -998,3 +1002,11 @@ export default function App() {
     </>
   )
 }
+
+  // New focused UI state
+  const [userProblem, setUserProblem] = useState('')
+  const [focusArea, setFocusArea] = useState('overall') // overall | Timing | Rhythm | Technique | Tone
+  const [guitarStyle, setGuitarStyle] = useState('')
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedbackSessionId, setFeedbackSessionId] = useState(null)

@@ -45,6 +45,9 @@ class Session(db.Model):
     duration = db.Column(db.Float, nullable=True)
     ai_status = db.Column(db.String, default='pending') # pending, completed, failed
     backing_track_url = db.Column(db.String, nullable=True)
+        problem = db.Column(db.String, nullable=True)  # User's stated problem
+        focus = db.Column(db.String, nullable=True)    # Selected focus area: Timing, Rhythm, Technique, Tone
+        style = db.Column(db.String, nullable=True)    # Guitar style: Metal, Blues, Jazz, etc.
     
     performance_metric = db.relationship('PerformanceMetric', backref='session', uselist=False, lazy=True)
     ai_feedback = db.relationship('AIFeedback', backref='session', uselist=False, lazy=True)
@@ -79,3 +82,12 @@ class LearningState(db.Model):
     last_improvement_score = db.Column(db.Float, nullable=True)
     streak_days = db.Column(db.Integer, default=0)
     last_practice_date = db.Column(db.Date, nullable=True)
+
+class DeveloperFeedback(db.Model):
+    __tablename__ = 'developer_feedback'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String, db.ForeignKey('users.user_id'), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    message = db.Column(db.Text, nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey('sessions.id'), nullable=True)  # Optional link to session

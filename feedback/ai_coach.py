@@ -13,55 +13,78 @@ class AICoach:
     Gracefully degrades if the API key is missing or the call fails.
     """
 
-    SYSTEM_PROMPT = """You are a professional musical guitar coach (ToneSense AI).
+    SYSTEM_PROMPT = """You are an expert guitar teacher and audio analyst.
 
-You are analyzing a student's guitar performance by listening to their raw audio recording and reviewing DSP metrics.
+You are given:
+1) A user-written description of their goal and problem
+2) A guitar recording (audio)
 
-Your job is to give highly constructive, musical, and technical feedback in JSON format.
+Your job is to provide highly specific, actionable feedback.
 
-Rules:
-* You MUST carefully analyze the provided WAV audio file to detect the underlying Scale/Key and Rhythm.
-* IF a backing track is provided, compare the student's playing to the backing track's harmony and tempo. Help them stay in key and 'in the pocket'.
-* Speak like a real, encouraging music mentor.
-* Be conversational in the 'musical_advice' field, focusing on phrasing, dynamics, and feel.
-* Keep 'technical_focus' strictly limited to fixing the primary mechanical error based on DSP metrics.
-* IF the student is out of tune or off-beat relative to the backing track, prioritize that in technical feedback.
-* IMPORTANT: The pitch accuracy metric in this app is currently a self-consistency baseline, NOT proof that the player hit the correct notes of a song or scale. Do NOT claim they played the "right notes" for a song, scale, or backing track unless the audio itself clearly proves it.
-* IMPORTANT: If the take is mostly isolated open strings, sparse single notes, or too little melodic material, you MUST avoid naming a confident key/scale. In those cases set "detected_scale" to "Open-string exercise / not enough evidence".
-* IMPORTANT: If there is no stable rhythmic motif, set "detected_rhythm" to "Isolated note picking / no stable rhythmic motif detected".
-* IMPORTANT: Avoid exaggerated praise for simplistic practice material such as open strings, string checks, sparse picking, or tuner tests.
+---
 
-USER CONTEXT:
-* Skill Level: {skill_level}
-* Goal: {goal}
-* Language: {language} (You MUST write all generated text in this language!)
+USER INPUT:
 
-DSP DATA:
+Goal: {goal}
+Problem: {user_problem}
+Focus: {focus}
+Style: {style}
+Skill Level: {skill_level}
+Language: {language}
+
+---
+
+INSTRUCTIONS:
+
+1. Prioritize the USER'S GOAL over everything else.
+2. Focus ONLY on the selected focus area. Do not give broad, generic feedback.
+3. Analyze the audio carefully, but do NOT assume perfect accuracy.
+4. If something is unclear or uncertain in the audio, explicitly say so.
+5. Avoid generic phrases like "keep practicing" or "good job".
+6. Give concrete, practical advice the user can apply immediately.
+7. If relevant, suggest a short exercise tailored to the user's issue.
+8. Keep the tone professional but direct (not overly motivational, not harsh).
+
+---
+
+AUDIO CONTEXT:
+
+DSP Metrics:
 * Tempo: {bpm}
 * Timing deviation: {timing_ms} ms avg
 * Timing consistency: {timing_std}
 * Pitch accuracy: {pitch_accuracy}%
 * Detected issues: {issues_list}
 
-NOTE PROFILE:
+Note Analysis:
 * Total detected notes: {note_count}
-* Unique detected note names: {unique_notes}
-* Most common note names: {top_notes}
-* Open-string note ratio: {open_string_ratio}
-* Practice pattern hint: {practice_hint}
+* Detected scale/key: {detected_scale}
+* Detected rhythm: {detected_rhythm}
 
-PREVIOUS SESSION:
-* Previous Timing: {last_timing_ms} ms
-* Previous Accuracy: {last_pitch_accuracy}%
+Progress:
+* Previous timing: {last_timing_ms} ms
+* Previous accuracy: {last_pitch_accuracy}%
 
-Output exact JSON strictly conforming to this schema:
+---
+
+OUTPUT FORMAT:
+
 {{
-  "summary": "2-3 conversational sentences summarizing the overall feel and progress.",
-  "detected_scale": "The likely scale/key they played (e.g. 'A Minor Pentatonic', 'C Major'). If unsure, guess the closest.",
-  "detected_rhythm": "The primary rhythm pattern used (e.g. 'Straight 8th notes', 'Syncopated Triplets').",
-  "musical_advice": "A conversational paragraph with ideas on phrasing, dynamics, or musicality to make it sound better.",
-  "technical_focus": "The #1 DSP metric to fix (e.g., 'Timing was late by 30ms. Play on top of the beat')."
+  "diagnosis": "Short diagnosis (1–2 sentences explaining the core issue)",
+  "specific_issues": ["Issue 1", "Issue 2", ...],
+  "actionable_fixes": ["Fix 1", "Fix 2", ...],
+  "focused_exercise": "Optional: 1 focused exercise tailored to the problem, or null if not applicable"
 }}
+
+---
+
+IMPORTANT:
+
+* Do NOT repeat the user's input
+* Do NOT give general guitar theory unless directly relevant
+* Do NOT comment on areas outside the selected focus
+* If the audio is low quality, say it clearly and adjust confidence
+* Write all output in: {language}
 """
 
     def __init__(self, config: AIConfig):
@@ -108,7 +131,6 @@ Output exact JSON strictly conforming to this schema:
 
     def _build_note_profile(self, feedback_report_dict: dict) -> dict:
         notes = feedback_report_dict.get("notes") or []
-        open_strings = {"E2", "A2", "D3", "G3", "B3", "E4"}
 
         parsed_notes = []
         for note in notes:
@@ -122,16 +144,12 @@ Output exact JSON strictly conforming to this schema:
         counts = Counter(parsed_notes)
         total = len(parsed_notes)
         unique = sorted(counts)
-        open_count = sum(count for note_name, count in counts.items() if note_name in open_strings)
-        open_ratio = (open_count / total) if total else 0.0
         top_notes = ", ".join(f"{name} x{count}" for name, count in counts.most_common(4)) or "None"
 
         practice_hint = "General playing"
         if total <= 8:
             practice_hint = "Very sparse take"
-        if total and open_ratio >= 0.6:
-            practice_hint = "Likely open-string or string-check exercise"
-        elif len(unique) <= 2 and total > 0:
+        if len(unique) <= 2 and total > 0:
             practice_hint = "Very limited melodic content"
         elif len(unique) <= 4:
             practice_hint = "Simple note pattern or picking exercise"
@@ -140,10 +158,8 @@ Output exact JSON strictly conforming to this schema:
             "note_count": total,
             "unique_notes": ", ".join(unique) if unique else "None",
             "top_notes": top_notes,
-            "open_string_ratio": f"{open_ratio:.0%}",
             "practice_hint": practice_hint,
-            "is_limited_material": total <= 8 or len(unique) <= 3 or open_ratio >= 0.6,
-            "is_open_string_heavy": open_ratio >= 0.6,
+            "is_limited_material": total <= 8 or len(unique) <= 3,
         }
 
     def _apply_guardrails(self, advice: dict, note_profile: dict) -> dict:
@@ -152,19 +168,22 @@ Output exact JSON strictly conforming to this schema:
         if not note_profile.get("is_limited_material"):
             return result
 
-        result["detected_scale"] = "Open-string exercise / not enough evidence"
-        result["detected_rhythm"] = "Isolated note picking / no stable rhythmic motif detected"
-
-        if note_profile.get("is_open_string_heavy"):
-            result["summary"] = (
-                "This sounds more like an open-string or string-check exercise than a melodic performance. "
-                "That is useful practice, but there is not enough musical material here to identify a reliable key or scale."
+        # For new prompt format
+        if "diagnosis" in result:
+            result["diagnosis"] = (
+                "This take contains only limited melodic information, so treat it as a simple picking exercise rather than a full musical phrase. "
+                "Not enough evidence for confident key/scale analysis."
             )
-            result["musical_advice"] = (
-                "Use this kind of take to focus on clean attack, even volume, and relaxed right-hand control. "
-                "If you want deeper musical feedback, record a short riff, scale run, or phrase with fretted notes so there is enough material to judge phrasing and harmony."
-            )
+            if "specific_issues" not in result:
+                result["specific_issues"] = []
+            if "actionable_fixes" not in result:
+                result["actionable_fixes"] = ["Focus on consistent pick attack and timing", "Increase the length and complexity of the phrase for better feedback"]
+            result["focused_exercise"] = "Record a longer phrase with clearer melodic movement for more targeted feedback."
+        
+        # Fallback for old format
         else:
+            result["detected_scale"] = "Single-note exercise / not enough evidence"
+            result["detected_rhythm"] = "Isolated note picking / no stable rhythmic motif detected"
             result["summary"] = (
                 "This take contains only limited melodic information, so the safest reading is a simple picking exercise rather than a full musical phrase. "
                 "There is not enough evidence here for a confident key or scale label."
@@ -173,10 +192,9 @@ Output exact JSON strictly conforming to this schema:
                 "Treat this as a technique check: focus on consistent pick attack, clean note separation, and steady pulse. "
                 "For more musical coaching, record a longer phrase with clearer melodic movement."
             )
-
-        technical_focus = result.get("technical_focus") or ""
-        if "right notes" in technical_focus.lower():
-            result["technical_focus"] = "Focus on consistency of attack, timing, and string noise control."
+            technical_focus = result.get("technical_focus") or ""
+            if "right notes" in technical_focus.lower():
+                result["technical_focus"] = "Focus on consistency of attack, timing, and string noise control."
 
         return result
 
@@ -209,6 +227,9 @@ Output exact JSON strictly conforming to this schema:
             prompt = self.SYSTEM_PROMPT.format(
                 skill_level=ai_context.get("skill_level", "beginner"),
                 goal=ai_context.get("goal", "general improvement"),
+                user_problem=ai_context.get("problem", "Not specified"),
+                focus=ai_context.get("focus", "overall"),
+                style=ai_context.get("style", "Not specified"),
                 language=ai_context.get("language", "English"),
                 bpm=bpm,
                 timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
@@ -216,10 +237,8 @@ Output exact JSON strictly conforming to this schema:
                 pitch_accuracy=round(feedback_report_dict.get("accuracy_pct", 0), 1),
                 issues_list=issues_str,
                 note_count=note_profile["note_count"],
-                unique_notes=note_profile["unique_notes"],
-                top_notes=note_profile["top_notes"],
-                open_string_ratio=note_profile["open_string_ratio"],
-                practice_hint=note_profile["practice_hint"],
+                detected_scale=feedback_report_dict.get("detected_scale", "Unknown"),
+                detected_rhythm=feedback_report_dict.get("detected_rhythm", "Unknown"),
                 last_timing_ms=ai_context.get("last_timing_error") or "N/A",
                 last_pitch_accuracy=ai_context.get("last_accuracy") or "N/A"
             )

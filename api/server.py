@@ -27,7 +27,8 @@ from auth import require_auth
 from flask import g
 from payments import payments_bp
 
-
+# Import DeveloperFeedback model
+from database import DeveloperFeedback
 def _normalize_ai_payload(ai_advice: dict | None) -> tuple[dict | None, dict | None]:
     if not isinstance(ai_advice, dict):
         return ai_advice, None
@@ -214,6 +215,16 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 "last_timing_error": last_metrics.timing_error if last_metrics else None,
                 "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
             }
+            # New user inputs from the focused UI
+            user_problem = request.form.get("problem", "")
+            focus = request.form.get("focus", "overall")
+            style = request.form.get("style", "")
+            
+            ai_context.update({
+                "problem": user_problem,
+                "focus": focus,
+                "style": style,
+            })
 
             # Analyze
             report = analyze_wav_file(str(tmp), config, ai_context=ai_context, run_ai=False)
@@ -229,6 +240,9 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             ai_status = 'completed' if is_silent else 'processing'
             
             new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url, ai_status=ai_status)
+                        new_session.problem = user_problem
+                        new_session.focus = focus
+                        new_session.style = style
             db.session.add(new_session)
             db.session.flush() # get ID
 
@@ -352,6 +366,29 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "ai_advice": advice,
             "ai_meta": ai_meta,
         })
+            @app.route("/api/feedback", methods=["POST"])
+            @require_auth
+            def submit_feedback():
+                """Store developer feedback from users (visible only to developer)."""
+                data = request.get_json()
+                message = data.get("message", "").strip()
+                session_id = data.get("session_id")
+        
+                if not message:
+                    return jsonify({"error": "Message cannot be empty"}), 400
+        
+                feedback = DeveloperFeedback(
+                    user_id=g.user_id,
+                    message=message,
+                    session_id=session_id if session_id else None
+                )
+                db.session.add(feedback)
+                db.session.commit()
+        
+                return jsonify({
+                    "status": "ok",
+                    "feedback_id": feedback.id
+                }), 201
 
     # ── Serve React build (production) ───────────────────────────────────────
     # Always register this catch-all so that React Router (HashRouter or BrowserRouter)
