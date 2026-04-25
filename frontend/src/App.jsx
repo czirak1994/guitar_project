@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import PerformanceChart from './PerformanceChart'
-import YouTube from 'react-youtube'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
+import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, SessionHistoryPanel, DeveloperFeedbackModal } from './components/AppPanels'
 import './App.css'
 
 const AI_POLL_INTERVAL_MS = 3000
@@ -276,250 +275,6 @@ function TunerWidget({ active, onToggle, disabled }) {
   )
 }
 
-function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume, backingVolume, setBackingVolume, hasBackingTrack }) {
-  return (
-    <div className="widget">
-      <div className="widget-title">Session Controls</div>
-      <div className="controls-grid">
-        <div className="field">
-          <label>Tempo (BPM)</label>
-          <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Metronome Vol</label>
-          <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
-        </div>
-        {hasBackingTrack && (
-          <div className="field">
-            <label>Backing Vol</label>
-            <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function metricColor(key, value) {
-  if (key === 'accuracy_pct') return value >= 85 ? 'metric-good' : value >= 60 ? 'metric-warn' : 'metric-bad'
-  if (key === 'on_time_ratio') return value >= 0.8 ? 'metric-good' : value >= 0.5 ? 'metric-warn' : 'metric-bad'
-  if (key === 'timing_consistency') return value >= 70 ? 'metric-good' : value >= 40 ? 'metric-warn' : 'metric-bad'
-  if (key === 'amplitude_db') return value >= -40 ? 'metric-good' : value >= -55 ? 'metric-warn' : 'metric-bad'
-  return 'metric-nil'
-}
-
-function LatestStatsWidget({ result }) {
-  if (!result) return null;
-  const { notes = [], errors = [] } = result;
-
-  return (
-    <div className="widget">
-      <div className="widget-title">Latest Analysis Data</div>
-      <div className="metrics-grid-dense">
-        <div className="metric-box">
-          <div className={`metric-box-val ${metricColor('accuracy_pct', result.accuracy_pct)}`}>
-            {result.accuracy_pct?.toFixed(0)}%
-          </div>
-          <div className="metric-box-lbl">Pitch Acc</div>
-        </div>
-        <div className="metric-box">
-          <div className={`metric-box-val ${metricColor('on_time_ratio', result.on_time_ratio)}`}>
-            {((result.on_time_ratio || 0) * 100).toFixed(0)}%
-          </div>
-          <div className="metric-box-lbl">On-Time</div>
-        </div>
-        <div className="metric-box">
-          <div className="metric-box-val">{result.timing_error_ms > 0 ? '+' : ''}{result.timing_error_ms?.toFixed(0)}ms</div>
-          <div className="metric-box-lbl">Timing Err</div>
-        </div>
-        <div className="metric-box">
-          <div className={`metric-box-val ${metricColor('amplitude_db', result.amplitude_db)}`}>
-            {result.amplitude_db?.toFixed(0)}dB
-          </div>
-          <div className="metric-box-lbl">Level</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef }) {
-  const [url, setUrl] = useState("")
-  const [error, setError] = useState("")
-
-  const extractVideoId = (u) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = u.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
-  }
-
-  const handleLoad = () => {
-    const id = extractVideoId(url);
-    if (id) {
-      setBackingTrack({ url, videoId: id });
-      setError("");
-    } else {
-      setError("Invalid YouTube URL");
-    }
-  }
-
-  const onReady = (event) => {
-    playerRef.current = event.target;
-  };
-
-  return (
-    <div className="widget" style={{paddingBottom: '16px'}}>
-      <div className="widget-title">Backing Track</div>
-      {backingTrack ? (
-         <div className="yt-embed-container">
-            <YouTube 
-              videoId={backingTrack.videoId} 
-              opts={{ height: '180', width: '100%', playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1 } }}
-              onReady={onReady}
-            />
-            <button className="btn" style={{marginTop: 8, width: '100%'}} onClick={() => { setBackingTrack(null); playerRef.current = null; }} disabled={disabled}>Change Track</button>
-         </div>
-      ) : (
-         <div className="controls-grid" style={{gridTemplateColumns: '1fr auto', gap: 8}}>
-            <input className="input-field" placeholder="Paste YouTube URL..." value={url} onChange={e=>setUrl(e.target.value)} disabled={disabled}/>
-            <button className="btn" onClick={handleLoad} disabled={disabled || !url}>Load</button>
-         </div>
-      )}
-      {error && <div style={{color: 'var(--red)', fontSize: '0.8rem', marginTop: '8px'}}>{error}</div>}
-    </div>
-  )
-}
-
-function PaywallModal({ isOpen, onContinueFree, getToken }) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  if (!isOpen) return null
-
-  const handleUpgrade = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const jwt = await getToken()
-      const { data } = await axios.post(
-        '/api/create-checkout-session',
-        {},
-        { headers: { Authorization: `Bearer ${jwt}` } }
-      )
-      window.location.href = data.url
-    } catch (err) {
-      setError('Unable to start checkout. Please try again.')
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content">
-        <h2>Analysis Limit Reached</h2>
-        <p>
-          You've used all your free analyses for today. Upgrade to PRO for
-          unlimited AI coaching sessions, priority processing, and advanced
-          performance insights.
-        </p>
-        {error && (
-          <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: '12px' }}>
-            {error}
-          </div>
-        )}
-        <button
-          className="btn"
-          style={{
-            borderColor: 'var(--yellow)',
-            color: 'var(--yellow)',
-            width: '100%',
-            marginBottom: '12px',
-            padding: '12px',
-            fontSize: '1rem',
-            opacity: loading ? 0.6 : 1,
-          }}
-          onClick={handleUpgrade}
-          disabled={loading}
-        >
-          {loading ? (
-            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <span style={{
-                display: 'inline-block',
-                width: 14,
-                height: 14,
-                border: '2px solid var(--yellow)',
-                borderTopColor: 'transparent',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-              }} />
-              Redirecting to Checkout…
-            </span>
-          ) : (
-            'Upgrade to PRO'
-          )}
-        </button>
-        <button
-          className="btn"
-          style={{ width: '100%', opacity: 0.7 }}
-          onClick={onContinueFree}
-          disabled={loading}
-        >
-          Continue Free
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function OnboardingModal({ isOpen, onSubmit }) {
-  const [skill, setSkill] = useState('beginner')
-  const [goal, setGoal] = useState('timing')
-  const [language, setLanguage] = useState('English')
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content onboarding-content">
-        <h2>Welcome to ToneSense</h2>
-        <p>Let's personalize your learning plan to build a daily habit.</p>
-        
-        <div className="field">
-           <label>What is your skill level?</label>
-           <select value={skill} onChange={e => setSkill(e.target.value)}>
-              <option value="beginner">Beginner</option>
-              <option value="intermediate">Intermediate</option>
-              <option value="advanced">Advanced</option>
-           </select>
-        </div>
-        
-        <div className="field" style={{marginTop: 12}}>
-           <label>What is your primary goal?</label>
-           <select value={goal} onChange={e => setGoal(e.target.value)}>
-              <option value="timing">Mastering Timing & Rhythm</option>
-              <option value="soloing">Soloing & Phrasing</option>
-              <option value="technique">Clean Technique</option>
-              <option value="speed">Building Speed</option>
-           </select>
-        </div>
-
-        <div className="field" style={{marginTop: 12}}>
-           <label>Preferred AI Language</label>
-           <select value={language} onChange={e => setLanguage(e.target.value)}>
-              <option value="English">English</option>
-              <option value="Magyar (Hungarian)">Magyar (Hungarian)</option>
-              <option value="Español (Spanish)">Español (Spanish)</option>
-           </select>
-        </div>
-
-        <button className="btn" style={{marginTop: '24px', width: '100%', padding: '12px', fontSize: '1rem'}} onClick={() => onSubmit({skill, goal, language})}>
-          Start My Journey
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
@@ -558,6 +313,8 @@ export default function App() {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [feedbackSessionId, setFeedbackSessionId] = useState(null)
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false)
+  const [intentWarning, setIntentWarning] = useState('')
   
   const playerRef = useRef(null)
   
@@ -611,6 +368,12 @@ export default function App() {
       if (recordingRef.current) recordingRef.current.stop()
       return
     }
+
+    if (!userProblem.trim()) {
+      setIntentWarning('Please describe what you want help with first')
+      return
+    }
+    setIntentWarning('')
 
     if (inFlightRef.current) return
     inFlightRef.current = true
@@ -784,6 +547,27 @@ export default function App() {
      setPhase('idle')
   }
 
+  const handleFeedbackSubmit = async () => {
+    if (!feedbackMessage.trim()) return
+    setIsSendingFeedback(true)
+    try {
+      const jwt = await getToken()
+      await axios.post('/api/feedback', {
+        message: feedbackMessage.trim(),
+        session_id: feedbackSessionId,
+      }, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      })
+      setFeedbackMessage('')
+      setFeedbackSessionId(null)
+      setShowFeedbackModal(false)
+    } catch (e) {
+      alert(e.response?.data?.error || e.message || 'Could not send feedback')
+    } finally {
+      setIsSendingFeedback(false)
+    }
+  }
+
   const latestResult = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null
   const showOnboarding = profile && !profile.skill_level;
 
@@ -815,25 +599,11 @@ export default function App() {
              </div>
           )}
 
-          {/* Review Take Overlay */}
-          {phase === 'review' && pendingAudio && (
-             <div className="countdown-overlay">
-                <div style={{ background: 'var(--bg-panel)', padding: '24px', borderRadius: '8px', textAlign: 'center' }}>
-                   <h2 style={{ marginBottom: '16px', color: 'var(--text-1)', fontWeight: '500' }}>Review Recording</h2>
-                   <audio src={pendingAudio.url} controls style={{ marginBottom: '24px', display: 'block', outline: 'none' }} />
-                   <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                      <button className="btn" style={{ borderColor: 'var(--text-3)', color: 'var(--text-2)' }} onClick={handleDiscardTake}>Discard</button>
-                      <button className="btn" style={{ background: 'var(--accent-dim)', color: '#000', fontWeight: 600, border: 'none' }} onClick={handleAnalyzeTake}>Upload & Analyze</button>
-                   </div>
-                </div>
-             </div>
-          )}
-
           {/* Header */}
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
-              <a href="mailto:tonesense@tonesense.ai" className="header-link">Feedback</a>
+              <button className="header-profile-btn" onClick={() => setShowFeedbackModal(true)}>Send Feedback</button>
               <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
               <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
             </div>
@@ -864,6 +634,49 @@ export default function App() {
           <div className="workspace">
             {/* Left Panel: Controls */}
             <div className="controls-panel" style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}>
+
+              <div className="widget" style={{ paddingBottom: '18px' }}>
+                <div className="widget-title">What do you want help with?</div>
+                <textarea
+                  className="input-field"
+                  rows={4}
+                  value={userProblem}
+                  onChange={(e) => {
+                    setUserProblem(e.target.value)
+                    if (intentWarning) setIntentWarning('')
+                  }}
+                  placeholder={'e.g. My timing is inconsistent in fast alternate picking\n' +
+                    'e.g. I want to improve metal riff accuracy'}
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
+                {intentWarning && (
+                  <div style={{ marginTop: 8, color: 'var(--red)', fontSize: '0.85rem' }}>
+                    {intentWarning}
+                  </div>
+                )}
+
+                <div className="controls-grid" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Focus</label>
+                    <select value={focusArea} onChange={(e) => setFocusArea(e.target.value)}>
+                      <option value="Timing">Timing</option>
+                      <option value="Rhythm">Rhythm</option>
+                      <option value="Technique">Technique</option>
+                      <option value="Tone">Tone</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Style</label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      placeholder="e.g. Metal, Blues, Jazz"
+                      value={guitarStyle}
+                      onChange={(e) => setGuitarStyle(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
               
               {profile && profile.skill_level && (
                  <div className="widget dashboard-habit-widget">
@@ -885,12 +698,25 @@ export default function App() {
                     disabled={phase === 'analyzing' || phase === 'countdown'}
                   >
                     <div className="rec-indicator" />
-                    {phase === 'recording' ? 'STOP' : phase === 'analyzing' ? 'ANALYZING' : phase === 'countdown' ? 'WAIT' : 'RECORD'}
+                    {phase === 'recording' ? 'Stop Recording' : phase === 'analyzing' ? 'Analyzing' : phase === 'countdown' ? 'Wait' : 'Start Recording'}
                   </button>
                   <div className={`timer-display ${phase === 'recording' ? 'recording' : ''}`}>
                      {(elapsed).toFixed(1)}s
                   </div>
                 </div>
+
+                {phase === 'review' && pendingAudio && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ color: 'var(--text-2)', fontSize: '0.85rem', marginBottom: 8 }}>Recording ready</div>
+                    <audio src={pendingAudio.url} controls style={{ width: '100%', marginBottom: 10 }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn" onClick={handleDiscardTake}>Discard</button>
+                      <button className="btn" style={{ background: 'var(--accent-dim)', color: '#000', border: 'none', fontWeight: 600 }} onClick={handleAnalyzeTake}>
+                        Get Feedback
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="metronome-controls">
                   <button className="btn" style={{padding: '4px 8px'}} onClick={() => setMetroMuted(m => !m)}>
@@ -915,83 +741,7 @@ export default function App() {
               <LatestStatsWidget result={latestResult} />
             </div>
 
-            {/* Right Panel: Session History */}
-            <div className="session-panel">
-               <div className="widget" style={{borderBottom: '1px solid var(--border)', background: 'var(--bg-panel-hi)'}}>
-                 <div className="widget-title" style={{margin: 0}}>Session History</div>
-               </div>
-               <div className="session-history-container">
-                  <PerformanceChart sessions={sessionHistory} />
-                  
-                  {sessionHistory.length === 0 && (
-                    <div className="empty-state">
-                      Record a take to track your progress and receive AI feedback.
-                    </div>
-                  )}
-                  {sessionHistory.map(item => (
-                    <div key={item.id} className="history-item">
-                       <div className="history-header">
-                         <span className="history-time">{item.time}</span>
-                         <div className="history-result-stats">
-                           <span className="stat-pill">ACC: {item.accuracy_pct?.toFixed(0)}%</span>
-                           <span className="stat-pill">BPM: {item.bpm || 120}</span>
-                         </div>
-                       </div>
-                       
-                       {item.ai_status === 'pending' && (
-                           <div className="ai-feedback-box" style={{opacity: 0.7, textAlign: 'center'}}>
-                               <div style={{display: 'inline-block', width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 8, marginTop: 8}}></div>
-                               <div style={{fontSize: '0.9rem', color: 'var(--text-2)'}}>ToneSense AI is analyzing your performance...</div>
-                           </div>
-                       )}
-                       {item.ai_status === 'failed' && (
-                           <div className="ai-feedback-box" style={{color: 'var(--red)', fontSize: '0.9rem'}}>
-                             AI analysis failed.
-                             {item.ai_meta?.reason ? ` ${item.ai_meta.reason}` : ' Please try again.'}
-                           </div>
-                       )}
-                       {item.ai_status !== 'pending' && item.ai_status !== 'failed' && item.ai_advice && typeof item.ai_advice === 'object' && (
-                          <div className="ai-feedback-box">
-                             <div className="ai-feedback-header">Performance Review</div>
-                             {item.ai_meta?.used_fallback && (
-                               <div style={{marginBottom: 10, padding: '8px 10px', background: 'rgba(180, 140, 80, 0.12)', border: '1px solid rgba(180, 140, 80, 0.28)', borderRadius: 6, color: 'var(--text-2)', fontSize: '0.82rem'}}>
-                                 {item.ai_meta.uploaded_to_gemini === true
-                                   ? 'The WAV reached Gemini, but the AI response fell back to local guidance.'
-                                   : 'The WAV did not complete the Gemini pipeline, so local fallback guidance was shown instead.'}
-                                 {item.ai_meta.stage ? ` Stage: ${item.ai_meta.stage}.` : ''}
-                                 {item.ai_meta.reason ? ` Reason: ${item.ai_meta.reason}` : ''}
-                               </div>
-                             )}
-                             <div className="ai-summary">{item.ai_advice.summary}</div>
-                             
-                             <div className="ai-details-grid tonesense-badges" style={{display: 'flex', gap: '8px', flexDirection: 'row'}}>
-                                <div className="tonesense-badge" style={{flex: 1, background: 'var(--bg-deep)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '0.8rem'}}>
-                                   <strong style={{color: 'var(--blue)'}}>Key/Scale:</strong><br/>{item.ai_advice.detected_scale || 'N/A'}
-                                </div>
-                                <div className="tonesense-badge" style={{flex: 1, background: 'var(--bg-deep)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '0.8rem'}}>
-                                   <strong style={{color: 'var(--yellow)'}}>Rhythm:</strong><br/>{item.ai_advice.detected_rhythm || 'N/A'}
-                                </div>
-                             </div>
-
-                             <div className="ai-details-grid">
-                                <div className="ai-col fix">
-                                   <strong>🎼 Musical Insight:</strong>
-                                   <div style={{marginTop: 4, lineHeight: 1.5, color: 'var(--text-1)'}}>{item.ai_advice.musical_advice || item.ai_advice.problem}</div>
-                                </div>
-                                <div className="ai-col issue" style={{marginTop: 8}}>
-                                   <strong>⚙️ Technical Focus:</strong>
-                                   <div style={{marginTop: 4, color: 'var(--red)'}}>{item.ai_advice.technical_focus || item.ai_advice.cause}</div>
-                                </div>
-                             </div>
-                             
-                          </div>
-                       )}
-
-                    </div>
-                  ))}
-                  <div ref={historyEndRef} />
-               </div>
-            </div>
+            <SessionHistoryPanel sessionHistory={sessionHistory} historyEndRef={historyEndRef} />
           </div>
           
           <PaywallModal
@@ -1000,11 +750,18 @@ export default function App() {
             getToken={getToken}
           />
 
-          <footer className="app-footer">
-            <span>© 2024 ToneSense AI Coach</span>
-            <span className="footer-separator">•</span>
-            <a href="mailto:tonesense@tonesense.ai">tonesense@tonesense.ai</a>
-          </footer>
+          <DeveloperFeedbackModal
+            isOpen={showFeedbackModal}
+            message={feedbackMessage}
+            setMessage={setFeedbackMessage}
+            onClose={() => setShowFeedbackModal(false)}
+            onSend={handleFeedbackSubmit}
+            sending={isSendingFeedback}
+          />
+
+          <div style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: '0.78rem', padding: '8px 0 14px' }}>
+            This is an experimental AI tool. Feedback may not always be accurate.
+          </div>
         </div>
       </SignedIn>
     </>
