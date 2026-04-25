@@ -364,29 +364,30 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "ai_advice": advice,
             "ai_meta": ai_meta,
         })
-            @app.route("/api/feedback", methods=["POST"])
-            @require_auth
-            def submit_feedback():
-                """Store developer feedback from users (visible only to developer)."""
-                data = request.get_json()
-                message = data.get("message", "").strip()
-                session_id = data.get("session_id")
-        
-                if not message:
-                    return jsonify({"error": "Message cannot be empty"}), 400
-        
-                feedback = DeveloperFeedback(
-                    user_id=g.user_id,
-                    message=message,
-                    session_id=session_id if session_id else None
-                )
-                db.session.add(feedback)
-                db.session.commit()
-        
-                return jsonify({
-                    "status": "ok",
-                    "feedback_id": feedback.id
-                }), 201
+
+    @app.route("/api/feedback", methods=["POST"])
+    @require_auth
+    def submit_feedback():
+        """Store developer feedback from users (visible only to developer)."""
+        data = request.get_json()
+        message = data.get("message", "").strip()
+        session_id = data.get("session_id")
+
+        if not message:
+            return jsonify({"error": "Message cannot be empty"}), 400
+
+        feedback = DeveloperFeedback(
+            user_id=g.user_id,
+            message=message,
+            session_id=session_id if session_id else None
+        )
+        db.session.add(feedback)
+        db.session.commit()
+
+        return jsonify({
+            "status": "ok",
+            "feedback_id": feedback.id
+        }), 201
 
     # ── Serve React build (production) ───────────────────────────────────────
     # Always register this catch-all so that React Router (HashRouter or BrowserRouter)
