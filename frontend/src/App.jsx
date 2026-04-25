@@ -550,6 +550,14 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [pendingAudio, setPendingAudio] = useState(null)
   const [backingTrack, setBackingTrack] = useState(null)
+
+  // New focused UI state
+  const [userProblem, setUserProblem] = useState('')
+  const [focusArea, setFocusArea] = useState('overall') // overall | Timing | Rhythm | Technique | Tone
+  const [guitarStyle, setGuitarStyle] = useState('')
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedbackSessionId, setFeedbackSessionId] = useState(null)
   
   const playerRef = useRef(null)
   
@@ -1002,11 +1010,3 @@ export default function App() {
     </>
   )
 }
-
-  // New focused UI state
-  const [userProblem, setUserProblem] = useState('')
-  const [focusArea, setFocusArea] = useState('overall') // overall | Timing | Rhythm | Technique | Tone
-  const [guitarStyle, setGuitarStyle] = useState('')
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
-  const [feedbackMessage, setFeedbackMessage] = useState('')
-  const [feedbackSessionId, setFeedbackSessionId] = useState(null)
