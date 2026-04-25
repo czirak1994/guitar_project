@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat } from './components/AppPanels'
@@ -279,20 +279,20 @@ function TunerWidget({ active, onToggle, disabled }) {
 export default function App() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [bpm, setBpm] = useState(120)
   const [metroVolume, setMetroVolume] = useState(0.5)
   const [backingVolume, setBackingVolume] = useState(0.5)
 
-  // Detect Stripe redirect params (?success=true / ?canceled=true)
-  const stripeParams = new URLSearchParams(window.location.search)
+  // Detect Stripe redirect params — params live in the hash with HashRouter
+  const stripeParams = new URLSearchParams(location.search)
   const [stripeNotice, setStripeNotice] = useState(
     stripeParams.get('success') === 'true' ? 'success' :
     stripeParams.get('canceled') === 'true' ? 'canceled' : null
   )
   useEffect(() => {
     if (stripeNotice) {
-      // Clean the URL without reloading
-      window.history.replaceState({}, '', window.location.pathname + window.location.hash.split('?')[0])
+      navigate('/', { replace: true })
       const t = setTimeout(() => setStripeNotice(null), 6000)
       return () => clearTimeout(t)
     }

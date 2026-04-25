@@ -45,8 +45,8 @@ def create_checkout_session():
             ],
             mode='subscription',
             # HashRouter uses /#/ — params before the hash are visible to the server
-            success_url=f"{base_url}/?success=true#/",
-            cancel_url=f"{base_url}/?canceled=true#/",
+            success_url=f"{base_url}/#/?success=true",
+            cancel_url=f"{base_url}/#/?canceled=true",
             metadata={
                 "user_id": user_id
             }
