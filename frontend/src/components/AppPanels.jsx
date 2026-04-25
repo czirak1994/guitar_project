@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import YouTube from 'react-youtube'
 import PerformanceChart from '../PerformanceChart'
@@ -396,30 +396,49 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
 }
 
 // ── ChatPanel ─────────────────────────────────────────────────────────────────
-export function ChatPanel({ sessionId, getToken, initialMessages = [] }) {
+export function ChatPanel({ sessionId, getToken, context = {}, initialMessages = [] }) {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const bottomRef = useRef(null)
 
   const API = import.meta.env.VITE_API_URL || ''
+
+  // Auto-scroll when messages change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, sending])
 
   const sendMessage = async () => {
     const text = input.trim()
     if (!text || sending) return
     setSending(true)
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: text }])
+
+    const newHistory = [...messages, { role: 'user', content: text }]
+    setMessages(newHistory)
 
     try {
       const token = await getToken()
-      const res = await axios.post(
-        `${API}/api/session/${sessionId}/chat`,
-        { message: text },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
+      let res
+      if (sessionId) {
+        // Session-aware chat (has recording context)
+        res = await axios.post(
+          `${API}/api/session/${sessionId}/chat`,
+          { message: text },
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+      } else {
+        // Stateless text-only chat
+        res = await axios.post(
+          `${API}/api/chat`,
+          { message: text, history: messages, context },
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+      }
       setMessages(prev => [...prev, { role: 'assistant', content: res.data.response }])
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: '⚠ Error sending message. Please try again.' }])
+      setMessages(prev => [...prev, { role: 'assistant', content: '⚠ Something went wrong. Please try again.' }])
     } finally {
       setSending(false)
     }
@@ -430,16 +449,38 @@ export function ChatPanel({ sessionId, getToken, initialMessages = [] }) {
   }
 
   return (
-    <div className="widget" style={{ display: 'flex', flexDirection: 'column' }}>
-      <div className="widget-title">💬 Continue the Lesson</div>
-      {messages.length === 0 && (
-        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '12px 0', textAlign: 'center' }}>
-          Ask a follow-up question or request a deeper explanation…
-        </div>
-      )}
-      <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '8px 0' }}>
+    <div className="widget" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div className="widget-title" style={{ marginBottom: 8 }}>
+        💬 Chat with your AI Teacher
+        {!sessionId && <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--text-muted)', marginLeft: 8 }}>no recording needed</span>}
+      </div>
+
+      <div style={{
+        flex: 1,
+        minHeight: 220,
+        maxHeight: 480,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        paddingRight: 4,
+      }}>
+        {messages.length === 0 && (
+          <div style={{
+            color: 'var(--text-muted)',
+            fontSize: '0.85rem',
+            padding: '24px 12px',
+            textAlign: 'center',
+            lineHeight: 1.6,
+          }}>
+            {sessionId
+              ? 'Your recording has been analyzed above. Ask a follow-up or request a deeper explanation.'
+              : 'Ask me anything about your playing — or record a take first for audio analysis.'}
+          </div>
+        )}
+
         {messages.map((m, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <div style={{
               maxWidth: '82%',
               padding: '10px 14px',
@@ -447,37 +488,48 @@ export function ChatPanel({ sessionId, getToken, initialMessages = [] }) {
               background: m.role === 'user' ? 'var(--accent)' : 'var(--bg-deep)',
               color: m.role === 'user' ? '#fff' : 'var(--text-1)',
               border: m.role === 'assistant' ? '1px solid var(--border)' : 'none',
-              fontSize: '0.9rem',
-              lineHeight: 1.55,
+              fontSize: '0.88rem',
+              lineHeight: 1.6,
               whiteSpace: 'pre-wrap',
             }}>
               {m.content}
             </div>
           </div>
         ))}
+
         {sending && (
-          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 8 }}>
-            <div style={{ padding: '10px 14px', background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: '16px 16px 16px 4px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div style={{
+              padding: '10px 14px',
+              background: 'var(--bg-deep)',
+              border: '1px solid var(--border)',
+              borderRadius: '16px 16px 16px 4px',
+              color: 'var(--text-muted)',
+              fontSize: '0.85rem',
+            }}>
               ✦ Thinking…
             </div>
           </div>
         )}
+
+        <div ref={bottomRef} />
       </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'flex-end' }}>
         <textarea
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Ask a question or describe what you tried… (Enter to send, Shift+Enter for newline)"
+          placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
           rows={2}
-          style={{ flex: 1, resize: 'none', fontSize: '0.9rem' }}
+          style={{ flex: 1, resize: 'none', fontSize: '0.88rem' }}
           className="input-field"
           disabled={sending}
         />
         <button
           onClick={sendMessage}
           disabled={sending || !input.trim()}
-          style={{ alignSelf: 'flex-end', padding: '8px 16px' }}
+          style={{ padding: '8px 18px', alignSelf: 'flex-end', flexShrink: 0 }}
           className="btn-primary"
         >
           Send

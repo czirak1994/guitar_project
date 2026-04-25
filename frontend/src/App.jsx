@@ -760,13 +760,18 @@ export default function App() {
 
             <SessionHistoryPanel sessionHistory={sessionHistory} historyEndRef={historyEndRef} />
 
-            {chatSessionId && (
-              <ChatPanel
-                sessionId={chatSessionId}
-                getToken={getToken}
-                initialMessages={chatInitialMessages}
-              />
-            )}
+            <ChatPanel
+              sessionId={chatSessionId}
+              getToken={getToken}
+              initialMessages={chatInitialMessages}
+              context={{
+                problem: userProblem,
+                focus: focusArea,
+                style: guitarStyle,
+                scale_or_key: scaleKey,
+                rhythm_info: rhythmInfo,
+              }}
+            />
           </div>
           
           <PaywallModal

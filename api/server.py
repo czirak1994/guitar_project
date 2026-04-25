@@ -438,6 +438,36 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
 
         return jsonify({"response": ai_response})
 
+    @app.route("/api/chat", methods=["POST"])
+    @require_auth
+    def stateless_chat():
+        """Text-only chat with the AI teacher — no recording required.
+        Body: { message, history: [{role, content}], context: {problem, focus, style, scale_or_key, rhythm_info} }
+        """
+        data = request.get_json()
+        user_message = (data.get("message") or "").strip()
+        if not user_message:
+            return jsonify({"error": "Message cannot be empty"}), 400
+
+        history = data.get("history") or []
+        context = data.get("context") or {}
+
+        user = User.query.get(g.user_id)
+        session_context = {
+            "problem": context.get("problem", ""),
+            "focus": context.get("focus", "overall"),
+            "style": context.get("style", ""),
+            "scale_or_key": context.get("scale_or_key", ""),
+            "rhythm_info": context.get("rhythm_info", ""),
+            "language": (user.language if user else None) or "English",
+        }
+
+        from feedback.ai_coach import AICoach
+        coach = AICoach(config.ai)
+        ai_response = coach.chat_followup(history, user_message, session_context)
+
+        return jsonify({"response": ai_response})
+
     @app.route("/api/feedback", methods=["POST"])
     @require_auth
     def submit_feedback():
