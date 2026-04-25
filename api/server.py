@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import AppConfig
 from main import analyze_wav_file
-from database import db, User, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback
+from database import db, User, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback, ChatMessage
 from auth import require_auth
 from flask import g
 from payments import payments_bp
@@ -226,11 +226,15 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             user_problem = request.form.get("problem", "")
             focus = request.form.get("focus", "overall")
             style = request.form.get("style", "")
+            scale_or_key = request.form.get("scale_or_key", "")
+            rhythm_info = request.form.get("rhythm_info", "")
             
             ai_context.update({
                 "problem": user_problem,
                 "focus": focus,
                 "style": style,
+                "scale_or_key": scale_or_key,
+                "rhythm_info": rhythm_info,
             })
 
             # Analyze
@@ -308,6 +312,13 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                                 }),
                             )
                             db.session.add(fb)
+                            # Save initial AI response as first chat message
+                            first_chat = ChatMessage(
+                                session_id=sess_id,
+                                role="assistant",
+                                content=json.dumps(advice_payload) if advice_payload else "Analysis complete."
+                            )
+                            db.session.add(first_chat)
                             db.session.commit()
                     except Exception as e:
                         print(f"[Async AI] Error: {e}")
@@ -373,6 +384,59 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "ai_advice": advice,
             "ai_meta": ai_meta,
         })
+
+    @app.route("/api/session/<int:session_id>/chat", methods=["GET"])
+    @require_auth
+    def get_chat_history(session_id):
+        """Return the conversation history for a session."""
+        session = Session.query.get_or_404(session_id)
+        if session.user_id != g.user_id:
+            return jsonify({"error": "Unauthorized"}), 403
+
+        msgs = ChatMessage.query.filter_by(session_id=session_id).order_by(ChatMessage.id).all()
+        return jsonify([
+            {"role": m.role, "content": m.content, "timestamp": m.timestamp.isoformat()}
+            for m in msgs
+        ])
+
+    @app.route("/api/session/<int:session_id>/chat", methods=["POST"])
+    @require_auth
+    def send_chat_message(session_id):
+        """Send a follow-up text message in the lesson conversation."""
+        session = Session.query.get_or_404(session_id)
+        if session.user_id != g.user_id:
+            return jsonify({"error": "Unauthorized"}), 403
+
+        data = request.get_json()
+        user_message = (data.get("message") or "").strip()
+        if not user_message:
+            return jsonify({"error": "Message cannot be empty"}), 400
+
+        # Build history from DB (last 10)
+        existing = ChatMessage.query.filter_by(session_id=session_id).order_by(ChatMessage.id).all()
+        history = [{"role": m.role, "content": m.content} for m in existing]
+
+        # Save user message
+        db.session.add(ChatMessage(session_id=session_id, role="user", content=user_message))
+        db.session.commit()
+
+        # Call AI follow-up
+        from feedback.ai_coach import AICoach
+        coach = AICoach(config.ai)
+        user = User.query.get(g.user_id)
+        session_context = {
+            "problem": session.problem or "",
+            "focus": session.focus or "overall",
+            "style": session.style or "",
+            "language": (user.language if user else None) or "English",
+        }
+        ai_response = coach.chat_followup(history, user_message, session_context)
+
+        # Save AI response
+        db.session.add(ChatMessage(session_id=session_id, role="assistant", content=ai_response))
+        db.session.commit()
+
+        return jsonify({"response": ai_response})
 
     @app.route("/api/feedback", methods=["POST"])
     @require_auth

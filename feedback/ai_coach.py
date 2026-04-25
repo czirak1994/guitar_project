@@ -13,78 +13,133 @@ class AICoach:
     Gracefully degrades if the API key is missing or the call fails.
     """
 
-    SYSTEM_PROMPT = """You are an expert guitar teacher and audio analyst.
+    SYSTEM_PROMPT = """You are a professional guitar teacher having an ongoing conversation with a student.
 
-You are given:
-1) A user-written description of their goal and problem
-2) A guitar recording (audio)
+This is NOT a one-time analysis. This is an interactive lesson.
 
-Your job is to provide highly specific, actionable feedback.
+CORE BEHAVIOR:
+- Treat this as a continuous conversation, not a single response
+- Remember previous feedback and refine it
+- You are allowed to change your mind if new information appears
+- Do NOT defend incorrect assumptions
 
----
+PRIORITY ORDER:
+1) User intent and description (PRIMARY)
+2) Musical context (scale, rhythm, exercise)
+3) Audio analysis (can be uncertain)
 
-USER INPUT:
+MUSICAL INTELLIGENCE RULES:
+- Always interpret notes relative to a possible key or scale
+- Prefer diatonic explanations before labeling something as chromatic
+- If notes seem outside the scale, explain WHY (timing, noise, technique, bending, etc.)
+- Consider rhythm and timing, not just pitch
 
+UNCERTAINTY HANDLING:
+- If audio is unclear → say it
+- If multiple interpretations exist → list them briefly
+- Do NOT make confident claims without strong evidence
+
+TEACHING STYLE:
+- Be direct, precise, and helpful
+- Ask follow-up questions when needed
+- Guide the student step-by-step
+
+OUTPUT STYLE:
+- Keep answers structured but conversational
+- Avoid generic advice
+
+MUSICAL CONTEXT HANDLING:
+If a scale is provided (e.g. C major):
+- Treat notes as part of that scale first
+- Detect deviations as: passing tones, timing errors, technique issues
+- Do NOT immediately classify as chromatic
+
+If rhythm/tempo is provided:
+- Evaluate timing relative to it
+- Mention if playing is early/late/inconsistent
+
+If no scale is provided:
+- Try to infer one, but state uncertainty
+"""
+
+    FIRST_MESSAGE_PROMPT = """Conversation history:
+{history}
+
+STUDENT CONTEXT:
 Goal: {goal}
 Problem: {user_problem}
 Focus: {focus}
 Style: {style}
-Skill Level: {skill_level}
+Expected scale/key: {scale_or_key}
+Expected rhythm/tempo: {rhythm_info}
+Skill level: {skill_level}
 Language: {language}
 
----
-
-INSTRUCTIONS:
-
-1. Prioritize the USER'S GOAL over everything else.
-2. Focus ONLY on the selected focus area. Do not give broad, generic feedback.
-3. Analyze the audio carefully, but do NOT assume perfect accuracy.
-4. If something is unclear or uncertain in the audio, explicitly say so.
-5. Avoid generic phrases like "keep practicing" or "good job".
-6. Give concrete, practical advice the user can apply immediately.
-7. If relevant, suggest a short exercise tailored to the user's issue.
-8. Keep the tone professional but direct (not overly motivational, not harsh).
-
----
-
-AUDIO CONTEXT:
-
-DSP Metrics:
-* Tempo: {bpm}
+DSP METRICS:
+* Tempo: {bpm} BPM
 * Timing deviation: {timing_ms} ms avg
 * Timing consistency: {timing_std}
 * Pitch accuracy: {pitch_accuracy}%
 * Detected issues: {issues_list}
 
-Note Analysis:
+NOTE ANALYSIS:
 * Total detected notes: {note_count}
 * Detected scale/key: {detected_scale}
 * Detected rhythm: {detected_rhythm}
 
-Progress:
+PROGRESS:
 * Previous timing: {last_timing_ms} ms
 * Previous accuracy: {last_pitch_accuracy}%
 
----
+Audio: [attached]
 
-OUTPUT FORMAT:
-
-{{
-  "diagnosis": "Short diagnosis (1–2 sentences explaining the core issue)",
-  "specific_issues": ["Issue 1", "Issue 2", ...],
-  "actionable_fixes": ["Fix 1", "Fix 2", ...],
-  "focused_exercise": "Optional: 1 focused exercise tailored to the problem, or null if not applicable"
-}}
-
----
+TASK:
+1) Analyze the playing in context of the expected scale and rhythm
+2) If something sounds incorrect, explain it relative to the scale (not just "wrong note")
+3) Identify specific issues (timing, phrasing, technique)
+4) Give actionable fixes
+5) Ask ONE relevant follow-up question to continue the conversation
 
 IMPORTANT:
+- Do NOT default to "chromatic" unless clearly justified
+- Use the expected scale as reference
+- If mismatch occurs → explain, don't override
 
-* Do NOT repeat the user's input
-* Do NOT give general guitar theory unless directly relevant
-* Do NOT comment on areas outside the selected focus
-* If the audio is low quality, say it clearly and adjust confidence
-* Write all output in: {language}
+OUTPUT FORMAT (JSON):
+{{
+  "diagnosis": "Short diagnosis (1–2 sentences)",
+  "specific_issues": ["Issue 1", "Issue 2"],
+  "actionable_fixes": ["Fix 1", "Fix 2"],
+  "focused_exercise": "1 focused exercise or null",
+  "follow_up_question": "One question to continue the conversation"
+}}
+
+Write all output in: {language}
+"""
+
+    FOLLOW_UP_PROMPT = """Conversation history:
+{history}
+
+Previous AI feedback:
+{last_ai_response}
+
+Student follow-up message:
+{user_message}
+
+TASK:
+- Continue the lesson naturally
+- Answer the student's question directly
+- Refine or correct previous analysis if needed
+- Go deeper into the problem if useful
+- If appropriate, give a micro-exercise
+
+IMPORTANT:
+- You are allowed to revise your previous conclusions
+- Stay consistent with earlier context unless corrected
+- Keep the conversation flowing
+- Be concise — this is a chat, not a lecture
+- Do NOT output JSON. Respond in plain conversational text.
+- Write in: {language}
 """
 
     def __init__(self, config: AIConfig):
@@ -202,6 +257,12 @@ IMPORTANT:
         if ai_context is None:
             ai_context = {}
 
+        # Build conversation history string (last 5 messages)
+        history_msgs = ai_context.get("history", [])[-5:]
+        history_str = "\n".join(
+            f"[{m['role'].upper()}]: {m['content']}" for m in history_msgs
+        ) if history_msgs else "None (this is the first message)"
+
         stage = "init"
         uploaded_to_gemini = False
         youtube_context = bool(youtube_url)
@@ -224,12 +285,15 @@ IMPORTANT:
             issues_str = "\n  - ".join([e["message"] for e in errors]) if errors else "None detected"
             note_profile = self._build_note_profile(feedback_report_dict)
 
-            prompt = self.SYSTEM_PROMPT.format(
+            first_msg_prompt = self.FIRST_MESSAGE_PROMPT.format(
+                history=history_str,
                 skill_level=ai_context.get("skill_level", "beginner"),
                 goal=ai_context.get("goal", "general improvement"),
                 user_problem=ai_context.get("problem", "Not specified"),
                 focus=ai_context.get("focus", "overall"),
                 style=ai_context.get("style", "Not specified"),
+                scale_or_key=ai_context.get("scale_or_key", "Not specified"),
+                rhythm_info=ai_context.get("rhythm_info", "Not specified"),
                 language=ai_context.get("language", "English"),
                 bpm=bpm,
                 timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
@@ -266,7 +330,7 @@ IMPORTANT:
 
             from google.genai import types
 
-            prompt_parts = [prompt]
+            prompt_parts = [first_msg_prompt]
             if youtube_url:
                 print(f"[AICoach] Adding YouTube URL as text context: {youtube_url}")
                 prompt_parts.append(
@@ -291,6 +355,7 @@ IMPORTANT:
                         model=self.config.model,
                         contents=contents_list,
                         config=types.GenerateContentConfig(
+                            system_instruction=self.SYSTEM_PROMPT,
                             response_mime_type="application/json",
                         ),
                     )
@@ -395,3 +460,53 @@ IMPORTANT:
             reason="No audible guitar signal detected.",
             uploaded_to_gemini=False,
         ))
+
+    def chat_followup(self, history: list, user_message: str, session_context: dict = None) -> str:
+        """Send a text follow-up message in the ongoing lesson conversation.
+
+        Args:
+            history: List of {"role": "user"|"assistant", "content": str} dicts (last 5 used)
+            user_message: The new message from the student
+            session_context: Dict with problem, focus, style, language from the session
+
+        Returns:
+            Plain text response from the AI teacher.
+        """
+        if not self.is_available:
+            return "AI coaching is currently unavailable. Please try again later."
+
+        if session_context is None:
+            session_context = {}
+
+        # Last 5 messages as history string (excluding the new user message)
+        recent = history[-5:]
+        history_str = "\n".join(
+            f"[{m['role'].upper()}]: {m['content']}" for m in recent
+        ) if recent else "None (first follow-up)"
+
+        # Last assistant message for context
+        last_ai = next(
+            (m["content"] for m in reversed(history) if m["role"] == "assistant"),
+            "No previous AI response."
+        )
+
+        prompt = self.FOLLOW_UP_PROMPT.format(
+            history=history_str,
+            last_ai_response=last_ai,
+            user_message=user_message,
+            language=session_context.get("language", "English"),
+        )
+
+        try:
+            from google.genai import types
+            response = self._client.models.generate_content(
+                model=self.config.model,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT,
+                ),
+            )
+            return response.text.strip() if response.text else "I couldn't process that — please rephrase."
+        except Exception as e:
+            print(f"[AICoach] chat_followup error: {e}")
+            return "Sorry, I encountered an error. Please try again."

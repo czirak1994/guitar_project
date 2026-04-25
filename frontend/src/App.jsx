@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, SessionHistoryPanel, DeveloperFeedbackModal } from './components/AppPanels'
+import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, SessionHistoryPanel, DeveloperFeedbackModal, ChatPanel } from './components/AppPanels'
 import './App.css'
 
 const AI_POLL_INTERVAL_MS = 3000
@@ -310,10 +310,15 @@ export default function App() {
   const [userProblem, setUserProblem] = useState('')
   const [focusArea, setFocusArea] = useState('overall') // overall | Timing | Rhythm | Technique | Tone
   const [guitarStyle, setGuitarStyle] = useState('')
+  const [scaleKey, setScaleKey] = useState('')
+  const [rhythmInfo, setRhythmInfo] = useState('')
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [feedbackSessionId, setFeedbackSessionId] = useState(null)
   const [isSendingFeedback, setIsSendingFeedback] = useState(false)
+  // Chat state
+  const [chatSessionId, setChatSessionId] = useState(null)
+  const [chatInitialMessages, setChatInitialMessages] = useState([])
   
   const playerRef = useRef(null)
   
@@ -474,6 +479,10 @@ export default function App() {
             ai_advice: data.ai_advice,
             ai_meta: data.ai_meta,
             } : s));
+            if (data.ai_status === 'completed') {
+              setChatSessionId(sessionId)
+              setChatInitialMessages([])
+            }
               }
           } catch(e) {
               clearInterval(timer);
@@ -494,6 +503,8 @@ export default function App() {
       formData.append('problem', userProblem)
       formData.append('focus', focusArea)
       formData.append('style', guitarStyle)
+      formData.append('scale_or_key', scaleKey)
+      formData.append('rhythm_info', rhythmInfo)
     
     try {
         const jwt = await getToken()
@@ -661,6 +672,26 @@ export default function App() {
                       onChange={(e) => setGuitarStyle(e.target.value)}
                     />
                   </div>
+                  <div className="field">
+                    <label>Scale / Key <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.8rem' }}>(optional)</span></label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      placeholder="e.g. A minor, C major pentatonic"
+                      value={scaleKey}
+                      onChange={(e) => setScaleKey(e.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Rhythm / Tempo context <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.8rem' }}>(optional)</span></label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      placeholder="e.g. 16th note groove at 90 BPM"
+                      value={rhythmInfo}
+                      onChange={(e) => setRhythmInfo(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -728,6 +759,14 @@ export default function App() {
             </div>
 
             <SessionHistoryPanel sessionHistory={sessionHistory} historyEndRef={historyEndRef} />
+
+            {chatSessionId && (
+              <ChatPanel
+                sessionId={chatSessionId}
+                getToken={getToken}
+                initialMessages={chatInitialMessages}
+              />
+            )}
           </div>
           
           <PaywallModal

@@ -394,3 +394,95 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
     </div>
   )
 }
+
+// ── ChatPanel ─────────────────────────────────────────────────────────────────
+export function ChatPanel({ sessionId, getToken, initialMessages = [] }) {
+  const [messages, setMessages] = useState(initialMessages)
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+
+  const API = import.meta.env.VITE_API_URL || ''
+
+  const sendMessage = async () => {
+    const text = input.trim()
+    if (!text || sending) return
+    setSending(true)
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', content: text }])
+
+    try {
+      const token = await getToken()
+      const res = await axios.post(
+        `${API}/api/session/${sessionId}/chat`,
+        { message: text },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      setMessages(prev => [...prev, { role: 'assistant', content: res.data.response }])
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: '⚠ Error sending message. Please try again.' }])
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+  }
+
+  return (
+    <div className="widget" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="widget-title">💬 Continue the Lesson</div>
+      {messages.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '12px 0', textAlign: 'center' }}>
+          Ask a follow-up question or request a deeper explanation…
+        </div>
+      )}
+      <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '8px 0' }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+            <div style={{
+              maxWidth: '82%',
+              padding: '10px 14px',
+              borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+              background: m.role === 'user' ? 'var(--accent)' : 'var(--bg-deep)',
+              color: m.role === 'user' ? '#fff' : 'var(--text-1)',
+              border: m.role === 'assistant' ? '1px solid var(--border)' : 'none',
+              fontSize: '0.9rem',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+            }}>
+              {m.content}
+            </div>
+          </div>
+        ))}
+        {sending && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 8 }}>
+            <div style={{ padding: '10px 14px', background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: '16px 16px 16px 4px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              ✦ Thinking…
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          placeholder="Ask a question or describe what you tried… (Enter to send, Shift+Enter for newline)"
+          rows={2}
+          style={{ flex: 1, resize: 'none', fontSize: '0.9rem' }}
+          className="input-field"
+          disabled={sending}
+        />
+        <button
+          onClick={sendMessage}
+          disabled={sending || !input.trim()}
+          style={{ alignSelf: 'flex-end', padding: '8px 16px' }}
+          className="btn-primary"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  )
+}

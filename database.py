@@ -51,6 +51,7 @@ class Session(db.Model):
     
     performance_metric = db.relationship('PerformanceMetric', backref='session', uselist=False, lazy=True)
     ai_feedback = db.relationship('AIFeedback', backref='session', uselist=False, lazy=True)
+    chat_messages = db.relationship('ChatMessage', backref='session', lazy=True, order_by='ChatMessage.id')
 
 
 class PerformanceMetric(db.Model):
@@ -91,3 +92,13 @@ class DeveloperFeedback(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     message = db.Column(db.Text, nullable=False)
     session_id = db.Column(db.Integer, db.ForeignKey('sessions.id'), nullable=True)  # Optional link to session
+
+
+class ChatMessage(db.Model):
+    __tablename__ = 'chat_messages'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('sessions.id'), nullable=False)
+    role = db.Column(db.String, nullable=False)   # 'user' or 'assistant'
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
