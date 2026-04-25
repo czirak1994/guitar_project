@@ -22,13 +22,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import AppConfig
 from main import analyze_wav_file
-from database import db, User, Session, PerformanceMetric, AIFeedback, LearningState
+from database import db, User, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback
 from auth import require_auth
 from flask import g
 from payments import payments_bp
 
-# Import DeveloperFeedback model
-from database import DeveloperFeedback
 def _normalize_ai_payload(ai_advice: dict | None) -> tuple[dict | None, dict | None]:
     if not isinstance(ai_advice, dict):
         return ai_advice, None
@@ -240,9 +238,9 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             ai_status = 'completed' if is_silent else 'processing'
             
             new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url, ai_status=ai_status)
-                        new_session.problem = user_problem
-                        new_session.focus = focus
-                        new_session.style = style
+            new_session.problem = user_problem
+            new_session.focus = focus
+            new_session.style = style
             db.session.add(new_session)
             db.session.flush() # get ID
 
