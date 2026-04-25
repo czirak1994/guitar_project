@@ -314,7 +314,6 @@ export default function App() {
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [feedbackSessionId, setFeedbackSessionId] = useState(null)
   const [isSendingFeedback, setIsSendingFeedback] = useState(false)
-  const [intentWarning, setIntentWarning] = useState('')
   
   const playerRef = useRef(null)
   
@@ -368,12 +367,6 @@ export default function App() {
       if (recordingRef.current) recordingRef.current.stop()
       return
     }
-
-    if (!userProblem.trim()) {
-      setIntentWarning('Please describe what you want help with first')
-      return
-    }
-    setIntentWarning('')
 
     if (inFlightRef.current) return
     inFlightRef.current = true
@@ -643,18 +636,11 @@ export default function App() {
                   value={userProblem}
                   onChange={(e) => {
                     setUserProblem(e.target.value)
-                    if (intentWarning) setIntentWarning('')
                   }}
                   placeholder={'e.g. My timing is inconsistent in fast alternate picking\n' +
                     'e.g. I want to improve metal riff accuracy'}
                   style={{ width: '100%', resize: 'vertical' }}
                 />
-                {intentWarning && (
-                  <div style={{ marginTop: 8, color: 'var(--red)', fontSize: '0.85rem' }}>
-                    {intentWarning}
-                  </div>
-                )}
-
                 <div className="controls-grid" style={{ marginTop: 10 }}>
                   <div className="field">
                     <label>Focus</label>
