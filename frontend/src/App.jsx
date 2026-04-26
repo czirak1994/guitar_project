@@ -566,7 +566,8 @@ export default function App() {
           bpm,
         })
 
-        if (data.status === 'processing_ai') {
+        if (data.status === 'processing_ai' || data.status === 'completed') {
+          // 'completed' = silent audio: backend saved AIFeedback synchronously, poll will return immediately
           pollChatAI(data.session_id, jwt, aiMsgId)
         } else {
           inFlightRef.current = false
