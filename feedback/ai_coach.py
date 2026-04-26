@@ -13,53 +13,93 @@ class AICoach:
     Gracefully degrades if the API key is missing or the call fails.
     """
 
-    SYSTEM_PROMPT = """You are a professional guitar teacher having an ongoing conversation with a student.
+    SYSTEM_PROMPT = """You are a professional guitar teacher analyzing real user recordings.
 
-This is NOT a one-time analysis. This is an interactive lesson.
+This is an interactive lesson, not a one-time analysis.
 
-CORE BEHAVIOR:
-- Treat this as a continuous conversation, not a single response
-- Remember previous feedback and refine it
-- You are allowed to change your mind if new information appears
-- Do NOT defend incorrect assumptions
+---
 
 PRIORITY ORDER:
-1) User intent and description (PRIMARY)
-2) Musical context (scale, rhythm, exercise)
-3) Audio analysis (can be uncertain)
 
-MUSICAL INTELLIGENCE RULES:
-- Always interpret notes relative to a possible key or scale
-- Prefer diatonic explanations before labeling something as chromatic
-- If notes seem outside the scale, explain WHY (timing, noise, technique, bending, etc.)
-- Consider rhythm and timing, not just pitch
+1) User intent and description (PRIMARY)
+2) Musical context (scale, rhythm, technique)
+3) DSP-derived signals (timing, pitch, dynamics)
+4) Raw audio interpretation
+
+---
+
+MUSICAL INTERPRETATION RULES:
+
+- Always interpret notes relative to a musical context (key, scale, or exercise)
+- Prefer musical explanations over raw descriptions
+- Do NOT default to labeling something as "chromatic" unless clearly justified
+- If notes deviate, explain WHY (timing issues, technique, noise, articulation)
+
+---
+
+TIMING ANALYSIS:
+
+- Detect if the player is consistently early (rushing) or late (dragging)
+- Prefer patterns over single mistakes
+- Describe timing in practical terms:
+  "consistently early", "slightly behind", "unstable timing"
+- Avoid exact millisecond claims unless very clear
+
+---
+
+PITCH & NOTE ACCURACY:
+
+- Evaluate pitch relative to expected notes or scale
+- If unclear, say so
+- Prefer:
+  "doesn't quite land on the note"
+  over:
+  "wrong note"
+
+---
+
+EXPRESSIVE TECHNIQUES (BENDS, VIBRATO):
+
+- Do NOT assume precision
+- If a bend is present:
+  - evaluate whether it reaches a stable target pitch
+  - describe it as:
+    "slightly sharp", "doesn't fully reach", "unclear target"
+- Avoid exact cent measurements unless highly confident
+
+---
 
 UNCERTAINTY HANDLING:
-- If audio is unclear → say it
-- If multiple interpretations exist → list them briefly
-- Do NOT make confident claims without strong evidence
+
+- If audio is noisy or unclear → explicitly say it
+- If multiple interpretations exist → mention briefly
+- Never hallucinate precision
+
+---
 
 TEACHING STYLE:
-- Be direct, precise, and helpful
-- Ask follow-up questions when needed
-- Guide the student step-by-step
 
-OUTPUT STYLE:
-- Keep answers structured but conversational
+- Be direct, specific, and practical
+- Focus on what the user can fix immediately
 - Avoid generic advice
+- Do NOT overwhelm with too many issues
 
-MUSICAL CONTEXT HANDLING:
-If a scale is provided (e.g. C major):
-- Treat notes as part of that scale first
-- Detect deviations as: passing tones, timing errors, technique issues
-- Do NOT immediately classify as chromatic
+---
 
-If rhythm/tempo is provided:
-- Evaluate timing relative to it
-- Mention if playing is early/late/inconsistent
+CONVERSATION MODE:
 
-If no scale is provided:
-- Try to infer one, but state uncertainty
+- This is a continuous conversation
+- You are allowed to revise your previous conclusions
+- Answer follow-up questions precisely
+- Build on previous context
+
+---
+
+IMPORTANT:
+
+- Do NOT act like a generic AI assistant
+- Act like a real guitar teacher listening critically
+- Use DSP data as supporting evidence, not optional context
 """
 
     FIRST_MESSAGE_PROMPT = """Conversation history:
@@ -75,35 +115,14 @@ Expected rhythm/tempo: {rhythm_info}
 Skill level: {skill_level}
 Language: {language}
 
-DSP METRICS:
-* Tempo: {bpm} BPM
-* Timing deviation: {timing_ms} ms avg
-* Timing consistency: {timing_std}
-* Pitch accuracy: {pitch_accuracy}%
-* Detected issues: {issues_list}
-
-NOTE ANALYSIS:
-* Total detected notes: {note_count}
-* Detected scale/key: {detected_scale}
-* Detected rhythm: {detected_rhythm}
+DSP ANALYSIS (use as supporting evidence, not optional context):
+{dsp_json}
 
 PROGRESS:
 * Previous timing: {last_timing_ms} ms
 * Previous accuracy: {last_pitch_accuracy}%
 
 Audio: [attached]
-
-TASK:
-1) Analyze the playing in context of the expected scale and rhythm
-2) If something sounds incorrect, explain it relative to the scale (not just "wrong note")
-3) Identify specific issues (timing, phrasing, technique)
-4) Give actionable fixes
-5) Ask ONE relevant follow-up question to continue the conversation
-
-IMPORTANT:
-- Do NOT default to "chromatic" unless clearly justified
-- Use the expected scale as reference
-- If mismatch occurs → explain, don't override
 
 OUTPUT FORMAT (JSON):
 {{
@@ -209,12 +228,69 @@ IMPORTANT:
         elif len(unique) <= 4:
             practice_hint = "Simple note pattern or picking exercise"
 
+        detected_intervals = []
+        if len(parsed_notes) >= 2:
+            for i in range(1, min(len(parsed_notes), 8)):
+                detected_intervals.append(f"{parsed_notes[i-1]}→{parsed_notes[i]}")
+
         return {
             "note_count": total,
+            "detected_intervals": detected_intervals,
             "unique_notes": ", ".join(unique) if unique else "None",
             "top_notes": top_notes,
             "practice_hint": practice_hint,
             "is_limited_material": total <= 8 or len(unique) <= 3,
+            "note_density_per_sec": None,  # populated by caller if duration available
+        }
+
+    def _build_dsp_payload(self, feedback_report_dict: dict, note_profile: dict, bpm: float) -> dict:
+        """Build structured DSP data payload for AI input.
+
+        Returns a clean JSON-serializable dict that the AI receives as
+        structured evidence alongside the raw audio.
+        """
+        errors = feedback_report_dict.get("errors", [])
+
+        timing_error = feedback_report_dict.get("timing_error_ms", 0)
+        timing_std = feedback_report_dict.get("timing_std_ms", 0)
+        on_time = feedback_report_dict.get("on_time_ratio", 0)
+
+        # Derive a human-readable timing label
+        if abs(timing_error) < 10 and timing_std < 15:
+            timing_label = "stable"
+        elif timing_error > 20:
+            timing_label = "consistently late (dragging)"
+        elif timing_error < -20:
+            timing_label = "consistently early (rushing)"
+        elif timing_std > 30:
+            timing_label = "unstable"
+        else:
+            timing_label = "slightly uneven"
+
+        return {
+            "tempo_bpm": bpm,
+            "timing": {
+                "avg_offset_ms": round(timing_error, 1),
+                "std_dev_ms": round(timing_std, 1),
+                "consistency_score": round(feedback_report_dict.get("timing_consistency", 0), 1),
+                "on_time_ratio": round(on_time, 2),
+                "label": timing_label,
+            },
+            "pitch": {
+                "accuracy_pct": round(feedback_report_dict.get("accuracy_pct", 0), 1),
+                "stability": "limited data" if note_profile.get("is_limited_material") else "normal",
+            },
+            "dynamics": {
+                "avg_amplitude_db": round(feedback_report_dict.get("amplitude_db", -100), 1),
+            },
+            "notes": {
+                "total_detected": note_profile["note_count"],
+                "unique_notes": note_profile.get("unique_notes", "None"),
+                "top_notes": note_profile.get("top_notes", "None"),
+                "detected_intervals": note_profile.get("detected_intervals", []),
+                "practice_hint": note_profile.get("practice_hint", "General playing"),
+            },
+            "detected_issues": [e["message"] for e in errors] if errors else [],
         }
 
     def _apply_guardrails(self, advice: dict, note_profile: dict) -> dict:
@@ -281,9 +357,8 @@ IMPORTANT:
             )
 
         try:
-            errors = feedback_report_dict.get("errors", [])
-            issues_str = "\n  - ".join([e["message"] for e in errors]) if errors else "None detected"
             note_profile = self._build_note_profile(feedback_report_dict)
+            dsp_payload = self._build_dsp_payload(feedback_report_dict, note_profile, bpm)
 
             first_msg_prompt = self.FIRST_MESSAGE_PROMPT.format(
                 history=history_str,
@@ -295,14 +370,7 @@ IMPORTANT:
                 scale_or_key=ai_context.get("scale_or_key", "Not specified"),
                 rhythm_info=ai_context.get("rhythm_info", "Not specified"),
                 language=ai_context.get("language", "English"),
-                bpm=bpm,
-                timing_ms=round(feedback_report_dict.get("timing_error_ms", 0), 1),
-                timing_std=round(feedback_report_dict.get("timing_std_ms", 0), 1),
-                pitch_accuracy=round(feedback_report_dict.get("accuracy_pct", 0), 1),
-                issues_list=issues_str,
-                note_count=note_profile["note_count"],
-                detected_scale=feedback_report_dict.get("detected_scale", "Unknown"),
-                detected_rhythm=feedback_report_dict.get("detected_rhythm", "Unknown"),
+                dsp_json=json.dumps(dsp_payload, indent=2),
                 last_timing_ms=ai_context.get("last_timing_error") or "N/A",
                 last_pitch_accuracy=ai_context.get("last_accuracy") or "N/A"
             )
