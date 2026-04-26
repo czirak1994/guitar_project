@@ -22,10 +22,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import AppConfig
 from main import analyze_wav_file
-from database import db, User, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback, ChatMessage
-from auth import require_auth
-from flask import g
+from database import db, User, GuestUser, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback, ChatMessage
+from auth import require_auth, optional_auth, get_client_ip
+from flask import g, make_response
 from payments import payments_bp
+
+# Cookie config: prod uses secure=True; dev (no DATABASE_URL) leaves it False.
+_COOKIE_SECURE = bool(os.getenv('DATABASE_URL'))
+_COOKIE_MAX_AGE = 60 * 60 * 24 * 365  # 1 year
+
+
+def _get_or_create_guest() -> GuestUser:
+    """Lookup or create a GuestUser based on g.guest_id (set by optional_auth)."""
+    guest = GuestUser.query.get(g.guest_id)
+    if not guest:
+        guest = GuestUser(
+            anon_token=g.guest_id,
+            ip_address=get_client_ip(),
+            usage_count=0,
+            last_usage_date=datetime.date.today(),
+        )
+        db.session.add(guest)
+        db.session.commit()
+    return guest
+
+
+def _attach_guest_cookie(resp):
+    """Attach anon_token cookie to response if a new guest token was just generated."""
+    if getattr(g, 'is_new_guest', False) and getattr(g, 'guest_id', None):
+        resp.set_cookie(
+            'anon_token',
+            g.guest_id,
+            max_age=_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite='Lax',
+            secure=_COOKIE_SECURE,
+        )
+    return resp
 
 def _normalize_ai_payload(ai_advice: dict | None) -> tuple[dict | None, dict | None]:
     if not isinstance(ai_advice, dict):
@@ -69,8 +102,18 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 conn.execute(db.text(
                     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS style VARCHAR"
                 ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS guest_token VARCHAR"
+                ))
+                # Make user_id nullable on existing tables
+                try:
+                    conn.execute(db.text(
+                        "ALTER TABLE sessions ALTER COLUMN user_id DROP NOT NULL"
+                    ))
+                except Exception:
+                    pass
                 conn.commit()
-                print("[DB] Migration: stripe_customer_id, problem, focus, style columns ensured.")
+                print("[DB] Migration: stripe_customer_id, problem, focus, style, guest_token columns ensured.")
         except Exception as migration_err:
             # SQLite doesn't support IF NOT EXISTS on ALTER TABLE
             # but it's fine — it will fail silently on SQLite dev env
@@ -156,21 +199,30 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         })
 
     @app.route("/api/analyze", methods=["POST"])
-    @require_auth
+    @optional_auth
     def analyze_upload():
-        """Analyze an uploaded WAV file from the browser."""
+        """Analyze an uploaded WAV file from the browser. Supports guest mode."""
         nonlocal results
-        
+
         # User & Usage Limit Enforcement
-        user_id = g.user_id
-        user = User.query.get(user_id)
-        if not user:
-            user = User(user_id=user_id)
-            db.session.add(user)
-            db.session.commit()
-            
-        if not user.can_analyze():
-            return jsonify({"error": "LIMIT_REACHED"}), 403
+        user = None
+        guest = None
+        if g.is_guest:
+            guest = _get_or_create_guest()
+            if not guest.can_analyze():
+                resp = jsonify({"error": "GUEST_LIMIT_REACHED", "remaining_today": 0})
+                resp.status_code = 403
+                return _attach_guest_cookie(resp)
+        else:
+            user_id = g.user_id
+            user = User.query.get(user_id)
+            if not user:
+                user = User(user_id=user_id)
+                db.session.add(user)
+                db.session.commit()
+
+            if not user.can_analyze():
+                return jsonify({"error": "LIMIT_REACHED"}), 403
 
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
@@ -197,31 +249,42 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         f.save(tmp)
         
         try:
-            # 1. Update streak/learning state
-            learning_state = user.learning_state
-            if not learning_state:
-                learning_state = LearningState(user_id=user.user_id)
-                db.session.add(learning_state)
-                
-            today = datetime.date.today()
-            if learning_state.last_practice_date != today:
-                if learning_state.last_practice_date == today - datetime.timedelta(days=1):
-                    learning_state.streak_days += 1
-                elif learning_state.last_practice_date is None or learning_state.last_practice_date < today - datetime.timedelta(days=1):
-                    learning_state.streak_days = 1 # Reset or start
-                learning_state.last_practice_date = today
+            # 1. Update streak/learning state (authenticated users only)
+            learning_state = None
+            if user is not None:
+                learning_state = user.learning_state
+                if not learning_state:
+                    learning_state = LearningState(user_id=user.user_id)
+                    db.session.add(learning_state)
+
+                today = datetime.date.today()
+                if learning_state.last_practice_date != today:
+                    if learning_state.last_practice_date == today - datetime.timedelta(days=1):
+                        learning_state.streak_days += 1
+                    elif learning_state.last_practice_date is None or learning_state.last_practice_date < today - datetime.timedelta(days=1):
+                        learning_state.streak_days = 1 # Reset or start
+                    learning_state.last_practice_date = today
 
             # Get user context for AI prompt
-            last_session = Session.query.filter_by(user_id=user.user_id).order_by(Session.timestamp.desc()).first()
-            last_metrics = last_session.performance_metric if last_session else None
-            
-            ai_context = {
-                "skill_level": user.skill_level or "beginner",
-                "goal": user.goal or "general improvement",
-                "language": user.language or "English",
-                "last_timing_error": last_metrics.timing_error if last_metrics else None,
-                "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
-            }
+            if user is not None:
+                last_session = Session.query.filter_by(user_id=user.user_id).order_by(Session.timestamp.desc()).first()
+                last_metrics = last_session.performance_metric if last_session else None
+
+                ai_context = {
+                    "skill_level": user.skill_level or "beginner",
+                    "goal": user.goal or "general improvement",
+                    "language": user.language or "English",
+                    "last_timing_error": last_metrics.timing_error if last_metrics else None,
+                    "last_accuracy": last_metrics.pitch_accuracy if last_metrics else None
+                }
+            else:
+                ai_context = {
+                    "skill_level": "beginner",
+                    "goal": "general improvement",
+                    "language": "English",
+                    "last_timing_error": None,
+                    "last_accuracy": None,
+                }
             # New user inputs from the focused UI
             user_problem = request.form.get("problem", "")
             focus = request.form.get("focus", "overall")
@@ -250,7 +313,14 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             # If silent, we mark it as 'completed' immediately with a skip flag
             ai_status = 'completed' if is_silent else 'processing'
             
-            new_session = Session(user_id=user.user_id, bpm=config.analysis.bpm, duration=duration, backing_track_url=backing_track_url, ai_status=ai_status)
+            new_session = Session(
+                user_id=user.user_id if user else None,
+                guest_token=guest.anon_token if guest else None,
+                bpm=config.analysis.bpm,
+                duration=duration,
+                backing_track_url=backing_track_url,
+                ai_status=ai_status,
+            )
             new_session.problem = user_problem
             new_session.focus = focus
             new_session.style = style
@@ -283,7 +353,10 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             db.session.add(metrics)
             
             # Record usage
-            user.record_usage()
+            if user is not None:
+                user.record_usage()
+            elif guest is not None:
+                guest.record_usage()
             db.session.commit()
             
             # Start Async AI
@@ -340,24 +413,37 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 t.daemon = True
                 t.start()
 
-            return jsonify({
+            response_payload = {
                 "session_id": new_session.id,
                 "status": "completed" if is_silent else "processing_ai",
                 "accuracy_pct": report.get("accuracy_pct"),
                 "bpm": config.analysis.bpm,
-                "streak_days": learning_state.streak_days,
-                "current_focus": learning_state.current_focus
-            })
+                "streak_days": learning_state.streak_days if learning_state else None,
+                "current_focus": learning_state.current_focus if learning_state else None,
+                "is_guest": g.is_guest,
+                "remaining_today": (
+                    guest.remaining_today if guest is not None
+                    else (None if (user and user.plan == "pro") else max(0, 5 - user.usage_count) if user else None)
+                ),
+            }
+            resp = jsonify(response_payload)
+            return _attach_guest_cookie(resp)
 
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
         # tmp file removed in async thread
 
+    def _can_access_session(session: Session) -> bool:
+        """Check if current request (user or guest) owns the session."""
+        if not g.is_guest:
+            return session.user_id == g.user_id
+        return bool(session.guest_token) and session.guest_token == g.guest_id
+
     @app.route("/api/session/<int:session_id>", methods=["GET"])
-    @require_auth
+    @optional_auth
     def get_session(session_id):
         session = Session.query.get_or_404(session_id)
-        if session.user_id != g.user_id:
+        if not _can_access_session(session):
             return jsonify({"error": "Unauthorized"}), 403
             
         metrics = session.performance_metric
@@ -386,11 +472,11 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         })
 
     @app.route("/api/session/<int:session_id>/chat", methods=["GET"])
-    @require_auth
+    @optional_auth
     def get_chat_history(session_id):
         """Return the conversation history for a session."""
         session = Session.query.get_or_404(session_id)
-        if session.user_id != g.user_id:
+        if not _can_access_session(session):
             return jsonify({"error": "Unauthorized"}), 403
 
         msgs = ChatMessage.query.filter_by(session_id=session_id).order_by(ChatMessage.id).all()
@@ -400,11 +486,11 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         ])
 
     @app.route("/api/session/<int:session_id>/chat", methods=["POST"])
-    @require_auth
+    @optional_auth
     def send_chat_message(session_id):
         """Send a follow-up text message in the lesson conversation."""
         session = Session.query.get_or_404(session_id)
-        if session.user_id != g.user_id:
+        if not _can_access_session(session):
             return jsonify({"error": "Unauthorized"}), 403
 
         data = request.get_json()
@@ -423,7 +509,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         # Call AI follow-up
         from feedback.ai_coach import AICoach
         coach = AICoach(config.ai)
-        user = User.query.get(g.user_id)
+        user = User.query.get(g.user_id) if g.user_id else None
         session_context = {
             "problem": session.problem or "",
             "focus": session.focus or "overall",
@@ -439,7 +525,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         return jsonify({"response": ai_response})
 
     @app.route("/api/chat", methods=["POST"])
-    @require_auth
+    @optional_auth
     def stateless_chat():
         """Text-only chat with the AI teacher — no recording required.
         Body: { message, history: [{role, content}], context: {problem, focus, style, scale_or_key, rhythm_info} }
@@ -452,7 +538,11 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         history = data.get("history") or []
         context = data.get("context") or {}
 
-        user = User.query.get(g.user_id)
+        # Ensure guest record exists so cookie can be set on response
+        if g.is_guest:
+            _get_or_create_guest()
+
+        user = User.query.get(g.user_id) if g.user_id else None
         session_context = {
             "problem": context.get("problem", ""),
             "focus": context.get("focus", "overall"),
@@ -466,7 +556,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         coach = AICoach(config.ai)
         ai_response = coach.chat_followup(history, user_message, session_context)
 
-        return jsonify({"response": ai_response})
+        resp = jsonify({"response": ai_response})
+        return _attach_guest_cookie(resp)
 
     @app.route("/api/feedback", methods=["POST"])
     @require_auth
@@ -491,6 +582,70 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             "status": "ok",
             "feedback_id": feedback.id
         }), 201
+
+    @app.route("/api/usage", methods=["GET"])
+    @optional_auth
+    def get_usage():
+        """Return remaining analysis count for current user (guest or authenticated)."""
+        if g.is_guest:
+            guest = _get_or_create_guest()
+            resp = jsonify({
+                "is_guest": True,
+                "plan": "guest",
+                "remaining_today": guest.remaining_today,
+                "daily_limit": 3,
+            })
+            return _attach_guest_cookie(resp)
+
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({"is_guest": False, "plan": "free", "remaining_today": 5, "daily_limit": 5})
+
+        if user.plan == "pro":
+            return jsonify({"is_guest": False, "plan": "pro", "remaining_today": None, "daily_limit": None})
+
+        today = datetime.date.today()
+        used = user.usage_count if user.last_usage_date == today else 0
+        return jsonify({
+            "is_guest": False,
+            "plan": user.plan,
+            "remaining_today": max(0, 5 - used),
+            "daily_limit": 5,
+        })
+
+    @app.route("/api/auth/migrate-guest", methods=["POST"])
+    @require_auth
+    def migrate_guest_to_user():
+        """Migrate guest sessions to the now-authenticated user.
+        Called by frontend right after sign-up/sign-in if an anon_token cookie exists.
+        """
+        anon_token = request.cookies.get("anon_token")
+        if not anon_token:
+            return jsonify({"migrated": 0})
+
+        # Reassign sessions
+        sessions_to_migrate = Session.query.filter_by(guest_token=anon_token).all()
+        count = 0
+        for s in sessions_to_migrate:
+            s.user_id = g.user_id
+            s.guest_token = None
+            count += 1
+
+        # Optionally remove guest record
+        guest = GuestUser.query.get(anon_token)
+        if guest:
+            db.session.delete(guest)
+
+        db.session.commit()
+
+        # Clear cookie
+        resp = jsonify({"migrated": count})
+        resp.set_cookie(
+            'anon_token', '',
+            max_age=0, expires=0,
+            httponly=True, samesite='Lax', secure=_COOKIE_SECURE,
+        )
+        return resp
 
     # ── Serve React build (production) ───────────────────────────────────────
     # Always register this catch-all so that React Router (HashRouter or BrowserRouter)

@@ -197,6 +197,39 @@ export function PaywallModal({ isOpen, onContinueFree, getToken }) {
   )
 }
 
+export function GuestLimitModal({ isOpen, onSignUp, onClose }) {
+  if (!isOpen) return null
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h2>You've used your 3 free analyses today</h2>
+        <p>
+          Sign up for a free account to get <strong>5 analyses per day</strong> and save your
+          progress, streaks, and history. Upgrade to PRO for unlimited coaching anytime.
+        </p>
+        <button
+          className="btn btn-accent"
+          style={{ width: '100%', marginBottom: '12px', padding: '12px', fontSize: '1rem' }}
+          onClick={onSignUp}
+        >
+          Sign up — Free
+        </button>
+        <button
+          className="btn"
+          style={{ width: '100%', opacity: 0.7 }}
+          onClick={onClose}
+        >
+          Continue chatting (text only)
+        </button>
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 12, textAlign: 'center' }}>
+          Text chat with the AI is always unlimited. Only audio analyses are capped.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function OnboardingModal({ isOpen, onSubmit }) {
   const [skill, setSkill] = useState('beginner')
   const [goal, setGoal] = useState('timing')

@@ -1,9 +1,29 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
-import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat } from './components/AppPanels'
+import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
+import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal } from './components/AppPanels'
 import './App.css'
+
+// Send cookies (anon_token) on every request
+axios.defaults.withCredentials = true
+
+// Build Authorization header — empty object when no JWT (guest mode)
+function authHeaders(jwt) {
+  return jwt ? { Authorization: `Bearer ${jwt}` } : {}
+}
+
+// Detect if Clerk is configured. If not, the Clerk hooks/components no-op gracefully.
+const CLERK_ENABLED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+
+// Safe wrapper around useAuth — returns nulls when Clerk is not configured.
+function useSafeAuth() {
+  if (!CLERK_ENABLED) {
+    return { getToken: async () => null, isLoaded: true, isSignedIn: false }
+  }
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useAuth()
+}
 
 const AI_POLL_INTERVAL_MS = 3000
 const AI_POLL_TIMEOUT_MS = 90000
@@ -277,7 +297,7 @@ function TunerWidget({ active, onToggle, disabled }) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const { getToken, isLoaded, isSignedIn } = useAuth()
+  const { getToken, isLoaded, isSignedIn } = useSafeAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [bpm, setBpm] = useState(120)
@@ -298,13 +318,14 @@ export default function App() {
     }
   }, [stripeNotice])
   
-  const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | paywall
+  const [phase, setPhase] = useState('idle') // idle | countdown | recording | review | paywall | guest_limit
   const [countdown, setCountdown] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [chatMessages, setChatMessages] = useState([])
   const [activeChatSessionId, setActiveChatSessionId] = useState(null)
   const [latestMetrics, setLatestMetrics] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [usage, setUsage] = useState(null) // { is_guest, plan, remaining_today, daily_limit }
   const [pendingAudio, setPendingAudio] = useState(null)
   const [backingTrack, setBackingTrack] = useState(null)
   const [focusArea, setFocusArea] = useState('overall')
@@ -329,14 +350,27 @@ export default function App() {
   }, [backingVolume])
 
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
-       getToken().then(jwt => {
-         axios.get('/api/profile', { headers: { Authorization: `Bearer ${jwt}` } })
-           .then(res => {
-              setProfile(res.data)
-           })
-           .catch(err => console.error(err))
-       })
+    if (!isLoaded) return
+    if (isSignedIn) {
+      // Migrate any guest sessions, then fetch profile + usage with auth
+      getToken().then(async (jwt) => {
+        try {
+          await axios.post('/api/auth/migrate-guest', {}, { headers: authHeaders(jwt) })
+        } catch { /* non-fatal */ }
+        try {
+          const res = await axios.get('/api/profile', { headers: authHeaders(jwt) })
+          setProfile(res.data)
+        } catch (err) { console.error(err) }
+        try {
+          const res = await axios.get('/api/usage', { headers: authHeaders(jwt) })
+          setUsage(res.data)
+        } catch { /* ignore */ }
+      })
+    } else {
+      // Guest — no profile, but fetch usage so header shows remaining count
+      axios.get('/api/usage')
+        .then(res => setUsage(res.data))
+        .catch(() => {})
     }
   }, [isLoaded, isSignedIn, getToken])
 
@@ -344,7 +378,7 @@ export default function App() {
      try {
        const jwt = await getToken()
        const { data } = await axios.post('/api/profile', { skill_level: skill, goal: goal, language: language }, {
-         headers: { Authorization: `Bearer ${jwt}` }
+         headers: authHeaders(jwt)
        })
        setProfile(data)
      } catch (e) {
@@ -451,7 +485,7 @@ export default function App() {
           } : m))
           return
         }
-        const { data } = await axios.get(`/api/session/${sessionId}`, { headers: { Authorization: `Bearer ${jwt}` } })
+        const { data } = await axios.get(`/api/session/${sessionId}`, { headers: authHeaders(jwt) })
         if (data.ai_status === 'completed' || data.ai_status === 'failed') {
           clearInterval(timer)
           inFlightRef.current = false
@@ -498,7 +532,7 @@ export default function App() {
 
       if (isFeedback) {
         axios.post('/api/feedback', { message: text, session_id: activeChatSessionId }, {
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers: authHeaders(jwt),
         }).catch(() => {})
       }
 
@@ -515,11 +549,14 @@ export default function App() {
         formData.append('rhythm_info', rhythmInfo)
 
         const { data } = await axios.post('/api/analyze', formData, {
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers: authHeaders(jwt),
         })
 
-        if (data.streak_days !== undefined) {
-          setProfile(p => ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }))
+        if (data.streak_days !== undefined && data.streak_days !== null) {
+          setProfile(p => p ? ({ ...p, streak_days: data.streak_days, current_focus: data.current_focus }) : p)
+        }
+        if (data.remaining_today !== undefined) {
+          setUsage(u => ({ ...(u || {}), is_guest: data.is_guest, remaining_today: data.remaining_today }))
         }
         setLatestMetrics({
           accuracy_pct: data.accuracy_pct,
@@ -548,14 +585,14 @@ export default function App() {
         let res
         if (activeChatSessionId) {
           res = await axios.post(`/api/session/${activeChatSessionId}/chat`, { message: text }, {
-            headers: { Authorization: `Bearer ${jwt}` },
+            headers: authHeaders(jwt),
           })
         } else {
           res = await axios.post('/api/chat', {
             message: text,
             history,
             context: { focus: focusArea, style: guitarStyle, scale_or_key: scaleKey, rhythm_info: rhythmInfo },
-          }, { headers: { Authorization: `Bearer ${jwt}` } })
+          }, { headers: authHeaders(jwt) })
         }
 
         setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
@@ -563,7 +600,12 @@ export default function App() {
         } : m))
       }
     } catch (e) {
-      if (e.response?.status === 403 && e.response?.data?.error === 'LIMIT_REACHED') {
+      const errCode = e.response?.data?.error
+      if (e.response?.status === 403 && errCode === 'GUEST_LIMIT_REACHED') {
+        setUsage(u => ({ ...(u || {}), remaining_today: 0 }))
+        setPhase('guest_limit')
+        setChatMessages(prev => prev.filter(m => m.id !== aiMsgId))
+      } else if (e.response?.status === 403 && errCode === 'LIMIT_REACHED') {
         setPhase('paywall')
         setChatMessages(prev => prev.filter(m => m.id !== aiMsgId))
       } else {
@@ -581,26 +623,12 @@ export default function App() {
     setPhase('idle')
   }
 
-  const showOnboarding = profile && !profile.skill_level
+  const showOnboarding = isSignedIn && profile && !profile.skill_level
+  const isGuest = !isSignedIn
 
   return (
     <>
-      <SignedOut>
-        <div className="auth-overlay">
-          <div className="auth-logo">ToneSense</div>
-          <div className="auth-tagline">AI-Powered Guitar Coach</div>
-          <div className="auth-card">
-            <h2>Welcome back</h2>
-            <p>Sign in to access your studio — AI analysis, precision tuner, and session tracking.</p>
-            <SignInButton mode="modal">
-              <button className="btn btn-accent" style={{width: '100%', padding: '11px', fontSize: '0.9rem', borderRadius: '8px'}}>Enter Studio</button>
-            </SignInButton>
-          </div>
-        </div>
-      </SignedOut>
-
-      <SignedIn>
-        <div className="app">
+      <div className="app">
           <OnboardingModal isOpen={showOnboarding} onSubmit={handleOnboardingSubmit} />
 
           {phase === 'countdown' && (
@@ -613,13 +641,41 @@ export default function App() {
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
-              {profile && profile.plan === 'free' && (
+              {usage && usage.remaining_today !== null && usage.remaining_today !== undefined && (
+                <span
+                  className="usage-pill"
+                  style={{
+                    fontSize: '0.78rem',
+                    color: usage.remaining_today === 0 ? 'var(--red)' : 'var(--text-2)',
+                    padding: '4px 10px',
+                    border: '1px solid var(--border)',
+                    borderRadius: 999,
+                    background: 'var(--bg-deep)',
+                  }}
+                  title={isGuest
+                    ? `Guests get ${usage.daily_limit || 3} recordings/day. Sign up for more.`
+                    : `Free plan: ${usage.daily_limit || 5} recordings/day. Upgrade to PRO for unlimited.`}
+                >
+                  {usage.remaining_today} {usage.remaining_today === 1 ? 'recording' : 'recordings'} left today
+                </span>
+              )}
+              {isGuest && CLERK_ENABLED && (
+                <SignInButton mode="modal">
+                  <button className="btn" style={{ padding: '6px 14px', fontSize: '0.84rem' }}>Sign in</button>
+                </SignInButton>
+              )}
+              {isGuest && CLERK_ENABLED && (
+                <SignUpButton mode="modal">
+                  <button className="btn btn-accent" style={{ padding: '6px 14px', fontSize: '0.84rem' }}>Sign up</button>
+                </SignUpButton>
+              )}
+              {isSignedIn && profile && profile.plan === 'free' && (
                 <button
                   className="upgrade-btn"
                   onClick={async () => {
                     try {
                       const jwt = await getToken()
-                      const { data } = await axios.post('/api/create-checkout-session', {}, { headers: { Authorization: `Bearer ${jwt}` } })
+                      const { data } = await axios.post('/api/create-checkout-session', {}, { headers: authHeaders(jwt) })
                       window.location.href = data.url
                     } catch { /* silent */ }
                   }}
@@ -627,8 +683,12 @@ export default function App() {
                   ⚡ Upgrade to PRO
                 </button>
               )}
-              <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
-              <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
+              {isSignedIn && (
+                <>
+                  <button className="header-profile-btn" onClick={() => navigate('/profile')}>⚙ Profile</button>
+                  <UserButton appearance={{ elements: { userButtonAvatarBox: { width: 28, height: 28 } } }} />
+                </>
+              )}
             </div>
           </header>
 
@@ -738,8 +798,27 @@ export default function App() {
             onContinueFree={() => setPhase('idle')}
             getToken={getToken}
           />
-        </div>
-      </SignedIn>
+
+          <GuestLimitModal
+            isOpen={phase === 'guest_limit'}
+            onSignUp={() => {
+              setPhase('idle')
+              // Clerk's SignUpButton uses an imperative ref; falling back to navigating to its hosted page if needed.
+              const btn = document.querySelector('[data-clerk-signup-trigger]')
+              if (btn) btn.click()
+            }}
+            onClose={() => setPhase('idle')}
+          />
+
+          {/* Hidden Clerk SignUp trigger — programmatically clicked from GuestLimitModal */}
+          {CLERK_ENABLED && (
+            <div style={{ display: 'none' }}>
+              <SignUpButton mode="modal">
+                <button data-clerk-signup-trigger />
+              </SignUpButton>
+            </div>
+          )}
+      </div>
     </>
   )
 }

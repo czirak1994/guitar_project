@@ -35,11 +35,40 @@ class User(db.Model):
         self.usage_count += 1
 
 
+class GuestUser(db.Model):
+    """Anonymous user tracked by cookie token + IP."""
+    __tablename__ = 'guest_users'
+
+    anon_token = db.Column(db.String, primary_key=True)   # UUID
+    ip_address = db.Column(db.String, nullable=True)
+    usage_count = db.Column(db.Integer, default=0)
+    last_usage_date = db.Column(db.Date, default=datetime.date.today)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def can_analyze(self) -> bool:
+        today = datetime.datetime.utcnow().date()
+        if self.last_usage_date != today:
+            self.usage_count = 0
+            self.last_usage_date = today
+        return self.usage_count < 3  # Guests: 3/day
+
+    def record_usage(self):
+        self.usage_count += 1
+
+    @property
+    def remaining_today(self) -> int:
+        today = datetime.datetime.utcnow().date()
+        if self.last_usage_date != today:
+            return 3
+        return max(0, 3 - self.usage_count)
+
+
 class Session(db.Model):
     __tablename__ = 'sessions'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.String, db.ForeignKey('users.user_id'), nullable=False)
+    user_id = db.Column(db.String, db.ForeignKey('users.user_id'), nullable=True)
+    guest_token = db.Column(db.String, nullable=True)  # Links to GuestUser.anon_token
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     bpm = db.Column(db.Float, nullable=True)
     duration = db.Column(db.Float, nullable=True)
@@ -88,7 +117,7 @@ class DeveloperFeedback(db.Model):
     __tablename__ = 'developer_feedback'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.String, db.ForeignKey('users.user_id'), nullable=False)
+    user_id = db.Column(db.String, db.ForeignKey('users.user_id'), nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     message = db.Column(db.Text, nullable=False)
     session_id = db.Column(db.Integer, db.ForeignKey('sessions.id'), nullable=True)  # Optional link to session
