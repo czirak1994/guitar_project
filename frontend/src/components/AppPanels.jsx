@@ -538,7 +538,6 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
             maxWidth: 340,
             paddingTop: 40,
           }}>
-            <div style={{ fontSize: '2rem', marginBottom: 12 }}>🎸</div>
             <div>Record your playing or ask a question to get started.</div>
             <div style={{ fontSize: '0.8rem', marginTop: 8, color: 'var(--text-3)' }}>
               Hit the mic button below, or just type something.
@@ -617,8 +616,8 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
             onKeyDown={handleKey}
             placeholder={
               isRecording ? 'Recording in progress…' :
-              hasAudio ? 'Add a note (optional) then Send…' :
-              'Ask a question or record your playing…'
+                hasAudio ? 'Add a note (optional) then Send…' :
+                  'Ask a question or record your playing…'
             }
             rows={2}
             disabled={isRecording || isBusy}
