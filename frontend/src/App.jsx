@@ -297,20 +297,21 @@ function TunerWidget({ active, onToggle, disabled, info }) {
 // ── Live Fretboard Visualizer ─────────────────────────────────────────────────
 const FRET_DISPLAY_STRINGS = [64, 59, 55, 50, 45, 40] // high e → low E
 const FRET_STRING_NAMES   = ['e', 'B', 'G', 'D', 'A', 'E']
-const FRET_COUNT = 12
+const FRET_COUNT = 24
 
-function FretboardVisualizer({ noteInfo, active }) {
+function FretboardVisualizer({ noteInfo, active, onToggle }) {
   const activeNote = (noteInfo && !noteInfo.error) ? (noteInfo.name ?? null) : null
   const cents = noteInfo?.cents ?? 0
   const inTune = activeNote && Math.abs(cents) <= 8
 
-  // SVG layout constants
-  const SY = [14, 27, 40, 53, 66, 79]          // y per string (high e … low E)
-  const NUT_X = 50                               // nut line x
-  const FRET_W = 50                              // px per fret
-  const OPEN_X = 35                              // open-string dot x
-  const BOARD_END = NUT_X + FRET_COUNT * FRET_W // 650
+  // SVG layout — wider string spacing for readable dots
+  const SY = [20, 38, 56, 74, 92, 110]          // y per string (high e … low E), 18px spacing
+  const NUT_X = 44                               // nut line x
+  const FRET_W = 30                              // px per fret (narrower for 24 frets)
+  const OPEN_X = 28                              // open-string dot x
+  const BOARD_END = NUT_X + FRET_COUNT * FRET_W // 764
   const MID_Y = (SY[0] + SY[5]) / 2            // board vertical center
+  const VH = 130                                 // viewBox height
 
   function noteAt(si, fret) {
     return NOTE_NAMES[(FRET_DISPLAY_STRINGS[si] + fret) % 12]
@@ -333,52 +334,65 @@ function FretboardVisualizer({ noteInfo, active }) {
     <div className="fretboard-widget">
       <div className="fretboard-header">
         <span className="fretboard-label">Live Fretboard</span>
-        {activeNote
-          ? <span className="fretboard-active-note" style={{ color: inTune ? 'var(--accent)' : 'var(--text-2)' }}>{activeNote}</span>
-          : <span className="fretboard-hint">{active ? 'listening…' : 'tuner off'}</span>
-        }
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {activeNote && (
+            <span className="fretboard-active-note" style={{ color: inTune ? 'var(--accent)' : 'var(--text-2)' }}>
+              {activeNote} {inTune ? '✓' : (cents > 0 ? '▲' : '▼')}
+            </span>
+          )}
+          {active && !activeNote && (
+            <span className="fretboard-hint">listening…</span>
+          )}
+          <button className="btn" style={{ padding: '3px 10px', fontSize: '0.75rem' }} onClick={onToggle}>
+            {active ? 'Stop' : 'Start'}
+          </button>
+        </div>
       </div>
 
       <div className="fretboard-svg-wrap">
-        <svg width="100%" height="92" viewBox="0 0 660 92" preserveAspectRatio="xMidYMid meet">
+        <svg width="100%" height={VH} viewBox={`0 0 780 ${VH}`} preserveAspectRatio="xMidYMid meet">
           {/* Board background */}
-          <rect x={NUT_X} y={SY[0] - 4} width={FRET_COUNT * FRET_W} height={SY[5] - SY[0] + 8}
-            fill="rgba(20,14,8,0.55)" rx={3} />
+          <rect x={NUT_X} y={SY[0] - 6} width={FRET_COUNT * FRET_W} height={SY[5] - SY[0] + 12}
+            fill="rgba(20,14,8,0.6)" rx={4} />
 
           {/* Strings */}
           {FRET_DISPLAY_STRINGS.map((_, i) => (
             <line key={i} x1={20} y1={SY[i]} x2={BOARD_END} y2={SY[i]}
-              stroke="rgba(200,165,90,0.38)" strokeWidth={0.5 + i * 0.3} />
+              stroke="rgba(200,165,90,0.45)" strokeWidth={0.6 + i * 0.3} />
           ))}
 
           {/* Fret lines */}
           {Array.from({ length: FRET_COUNT }, (_, i) => i + 1).map(f => (
-            <line key={f} x1={NUT_X + f * FRET_W} y1={SY[0] - 4} x2={NUT_X + f * FRET_W} y2={SY[5] + 4}
+            <line key={f} x1={NUT_X + f * FRET_W} y1={SY[0] - 6} x2={NUT_X + f * FRET_W} y2={SY[5] + 6}
               stroke="rgba(180,140,80,0.22)" strokeWidth={1} />
           ))}
 
           {/* Nut */}
-          <line x1={NUT_X} y1={SY[0] - 4} x2={NUT_X} y2={SY[5] + 4}
-            stroke="rgba(230,200,130,0.65)" strokeWidth={3.5} strokeLinecap="round" />
+          <line x1={NUT_X} y1={SY[0] - 6} x2={NUT_X} y2={SY[5] + 6}
+            stroke="rgba(230,200,130,0.7)" strokeWidth={4} strokeLinecap="round" />
 
           {/* Inlay dots */}
-          {[3, 5, 7, 9].map(f => (
+          {[3, 5, 7, 9, 15, 17, 19, 21].map(f => (
             <circle key={f} cx={NUT_X + (f - 0.5) * FRET_W} cy={MID_Y} r={3.5}
-              fill="rgba(180,140,80,0.18)" />
+              fill="rgba(180,140,80,0.2)" />
           ))}
-          <circle cx={NUT_X + (12 - 0.5) * FRET_W} cy={MID_Y - 8} r={3.5} fill="rgba(180,140,80,0.18)" />
-          <circle cx={NUT_X + (12 - 0.5) * FRET_W} cy={MID_Y + 8} r={3.5} fill="rgba(180,140,80,0.18)" />
+          {[12, 24].map(f => (
+            <g key={f}>
+              <circle cx={NUT_X + (f - 0.5) * FRET_W} cy={MID_Y - 10} r={3.5} fill="rgba(180,140,80,0.2)" />
+              <circle cx={NUT_X + (f - 0.5) * FRET_W} cy={MID_Y + 10} r={3.5} fill="rgba(180,140,80,0.2)" />
+            </g>
+          ))}
 
           {/* Fret number labels */}
-          {[3, 5, 7, 9, 12].map(f => (
-            <text key={f} x={NUT_X + (f - 0.5) * FRET_W} y={89} fontSize={8}
-              fill="rgba(120,90,50,0.7)" textAnchor="middle" fontFamily="monospace">{f}</text>
+          {[3, 5, 7, 9, 12, 15, 17, 19, 21, 24].map(f => (
+            <text key={f} x={NUT_X + (f - 0.5) * FRET_W} y={VH - 4} fontSize={8.5}
+              fill="rgba(120,90,50,0.8)" textAnchor="middle" fontFamily="monospace">{f}</text>
           ))}
 
           {/* String name labels */}
           {FRET_STRING_NAMES.map((n, i) => (
-            <text key={i} x={10} y={SY[i] + 4} fontSize={9}
-              fill="rgba(150,115,70,0.7)" textAnchor="middle" fontFamily="monospace">{n}</text>
+            <text key={i} x={11} y={SY[i] + 4} fontSize={11}
+              fill="rgba(150,115,70,0.8)" textAnchor="middle" fontFamily="monospace">{n}</text>
           ))}
 
           {/* Active note dots */}
@@ -387,13 +401,16 @@ function FretboardVisualizer({ noteInfo, active }) {
             const cy = SY[si]
             return (
               <g key={`${si}-${f}`}>
-                {inTune && (
-                  <circle cx={cx} cy={cy} r={9} fill="var(--accent)" opacity={0.15} />
-                )}
-                <circle cx={cx} cy={cy} r={6.5}
-                  fill={inTune ? 'var(--accent)' : 'rgba(245,166,35,0.55)'}
-                  stroke={inTune ? 'rgba(255,220,120,0.7)' : 'transparent'} strokeWidth={1} />
-                <text x={cx} y={cy + 3.5} fontSize={6.5} fill={inTune ? '#1a1108' : '#f0e6d3'}
+                {/* outer glow */}
+                <circle cx={cx} cy={cy} r={11}
+                  fill={inTune ? 'var(--accent)' : 'rgba(245,166,35,0.18)'} opacity={inTune ? 0.18 : 1} />
+                {/* main dot */}
+                <circle cx={cx} cy={cy} r={8}
+                  fill={inTune ? 'var(--accent)' : 'rgba(245,120,30,0.82)'}
+                  stroke={inTune ? 'rgba(255,230,140,0.85)' : 'rgba(245,166,35,0.5)'}
+                  strokeWidth={1.5} />
+                {/* note label */}
+                <text x={cx} y={cy + 3.5} fontSize={8} fill={inTune ? '#120d04' : '#f0e6d3'}
                   textAnchor="middle" fontFamily="monospace" fontWeight="bold">
                   {NOTE_NAMES[(FRET_DISPLAY_STRINGS[si] + f) % 12]}
                 </text>
@@ -447,10 +464,13 @@ export default function App() {
   const playerRef = useRef(null)
   
   const [tunerActive, setTunerActive] = useState(false)
+  const [fretboardActive, setFretboardActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
+  const [metroEnabled, setMetroEnabled] = useState(false)
   
-  const beat = useMetronome(bpm, phase === 'recording' && !metroMuted, metroVolume)
+  const beat = useMetronome(bpm, (metroEnabled || phase === 'recording') && !metroMuted, metroVolume)
   const tunerInfo = useTuner(tunerActive)
+  const fretboardInfo = useTuner(fretboardActive)
 
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
@@ -876,9 +896,16 @@ export default function App() {
                       <span key={i} className={`metro-dot ${beat === i ? (i === 0 ? 'accent' : 'active') : ''}`} />
                     ))}
                   </div>
-                  <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => setMetroMuted(m => !m)}>
-                    {metroMuted ? 'Unmute' : 'Mute'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                      onClick={() => setMetroEnabled(e => !e)}>
+                      {metroEnabled ? 'Stop' : 'Start'}
+                    </button>
+                    <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                      onClick={() => setMetroMuted(m => !m)}>
+                      {metroMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -895,7 +922,7 @@ export default function App() {
 
             {/* Right column: Fretboard + Chat */}
             <div className="right-column">
-              <FretboardVisualizer noteInfo={tunerInfo} active={tunerActive} />
+              <FretboardVisualizer noteInfo={fretboardInfo} active={fretboardActive} onToggle={() => setFretboardActive(a => !a)} />
               <ConversationalChat
                 messages={chatMessages}
                 phase={phase}

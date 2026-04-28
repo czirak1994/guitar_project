@@ -274,8 +274,8 @@ html, body, #root {
 
 .fretboard-active-note {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   letter-spacing: 0.5px;
   transition: color 0.2s;
 }
@@ -292,16 +292,12 @@ html, body, #root {
 }
 
 @media (max-width: 900px) {
-  .right-column { overflow-y: auto; flex: none; }
-  .fretboard-widget { overflow-x: auto; }
-  .fretboard-svg-wrap { min-width: 460px; }
-}
-
-@media (max-width: 900px) {
   .workspace { flex-direction: column; overflow-y: auto; }
   .controls-panel { width: 100%; max-width: none; border-right: none; border-bottom: 1px solid var(--border); overflow-y: visible; }
   .session-panel { overflow-y: visible; flex: none; height: auto; }
   .right-column { overflow-y: auto; flex: none; }
+  .fretboard-widget { overflow-x: auto; }
+  .fretboard-svg-wrap { min-width: 500px; }
   html, body, #root { overflow: auto; }
 }
 
