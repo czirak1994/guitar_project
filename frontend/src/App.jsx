@@ -246,8 +246,7 @@ function encodeWAV(samples, sampleRate) {
 
 // ── UI Components ─────────────────────────────────────────────────────────────
 
-function TunerWidget({ active, onToggle, disabled }) {
-  const info = useTuner(active)
+function TunerWidget({ active, onToggle, disabled, info }) {
   const hasNote = info && !info.error && !!info.name
   const cents = hasNote ? (info.cents ?? 0) : 0
   const rotation = Math.max(-50, Math.min(50, cents)) * 0.9
@@ -291,6 +290,118 @@ function TunerWidget({ active, onToggle, disabled }) {
             </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Live Fretboard Visualizer ─────────────────────────────────────────────────
+const FRET_DISPLAY_STRINGS = [64, 59, 55, 50, 45, 40] // high e → low E
+const FRET_STRING_NAMES   = ['e', 'B', 'G', 'D', 'A', 'E']
+const FRET_COUNT = 12
+
+function FretboardVisualizer({ noteInfo, active }) {
+  const activeNote = (noteInfo && !noteInfo.error) ? (noteInfo.name ?? null) : null
+  const cents = noteInfo?.cents ?? 0
+  const inTune = activeNote && Math.abs(cents) <= 8
+
+  // SVG layout constants
+  const SY = [14, 27, 40, 53, 66, 79]          // y per string (high e … low E)
+  const NUT_X = 50                               // nut line x
+  const FRET_W = 50                              // px per fret
+  const OPEN_X = 35                              // open-string dot x
+  const BOARD_END = NUT_X + FRET_COUNT * FRET_W // 650
+  const MID_Y = (SY[0] + SY[5]) / 2            // board vertical center
+
+  function noteAt(si, fret) {
+    return NOTE_NAMES[(FRET_DISPLAY_STRINGS[si] + fret) % 12]
+  }
+
+  function dotX(fret) {
+    return fret === 0 ? OPEN_X : NUT_X + (fret - 0.5) * FRET_W
+  }
+
+  const activeDots = []
+  if (activeNote) {
+    for (let si = 0; si < 6; si++) {
+      for (let f = 0; f <= FRET_COUNT; f++) {
+        if (noteAt(si, f) === activeNote) activeDots.push({ si, f })
+      }
+    }
+  }
+
+  return (
+    <div className="fretboard-widget">
+      <div className="fretboard-header">
+        <span className="fretboard-label">Live Fretboard</span>
+        {activeNote
+          ? <span className="fretboard-active-note" style={{ color: inTune ? 'var(--accent)' : 'var(--text-2)' }}>{activeNote}</span>
+          : <span className="fretboard-hint">{active ? 'listening…' : 'tuner off'}</span>
+        }
+      </div>
+
+      <div className="fretboard-svg-wrap">
+        <svg width="100%" height="92" viewBox="0 0 660 92" preserveAspectRatio="xMidYMid meet">
+          {/* Board background */}
+          <rect x={NUT_X} y={SY[0] - 4} width={FRET_COUNT * FRET_W} height={SY[5] - SY[0] + 8}
+            fill="rgba(20,14,8,0.55)" rx={3} />
+
+          {/* Strings */}
+          {FRET_DISPLAY_STRINGS.map((_, i) => (
+            <line key={i} x1={20} y1={SY[i]} x2={BOARD_END} y2={SY[i]}
+              stroke="rgba(200,165,90,0.38)" strokeWidth={0.5 + i * 0.3} />
+          ))}
+
+          {/* Fret lines */}
+          {Array.from({ length: FRET_COUNT }, (_, i) => i + 1).map(f => (
+            <line key={f} x1={NUT_X + f * FRET_W} y1={SY[0] - 4} x2={NUT_X + f * FRET_W} y2={SY[5] + 4}
+              stroke="rgba(180,140,80,0.22)" strokeWidth={1} />
+          ))}
+
+          {/* Nut */}
+          <line x1={NUT_X} y1={SY[0] - 4} x2={NUT_X} y2={SY[5] + 4}
+            stroke="rgba(230,200,130,0.65)" strokeWidth={3.5} strokeLinecap="round" />
+
+          {/* Inlay dots */}
+          {[3, 5, 7, 9].map(f => (
+            <circle key={f} cx={NUT_X + (f - 0.5) * FRET_W} cy={MID_Y} r={3.5}
+              fill="rgba(180,140,80,0.18)" />
+          ))}
+          <circle cx={NUT_X + (12 - 0.5) * FRET_W} cy={MID_Y - 8} r={3.5} fill="rgba(180,140,80,0.18)" />
+          <circle cx={NUT_X + (12 - 0.5) * FRET_W} cy={MID_Y + 8} r={3.5} fill="rgba(180,140,80,0.18)" />
+
+          {/* Fret number labels */}
+          {[3, 5, 7, 9, 12].map(f => (
+            <text key={f} x={NUT_X + (f - 0.5) * FRET_W} y={89} fontSize={8}
+              fill="rgba(120,90,50,0.7)" textAnchor="middle" fontFamily="monospace">{f}</text>
+          ))}
+
+          {/* String name labels */}
+          {FRET_STRING_NAMES.map((n, i) => (
+            <text key={i} x={10} y={SY[i] + 4} fontSize={9}
+              fill="rgba(150,115,70,0.7)" textAnchor="middle" fontFamily="monospace">{n}</text>
+          ))}
+
+          {/* Active note dots */}
+          {activeDots.map(({ si, f }) => {
+            const cx = dotX(f)
+            const cy = SY[si]
+            return (
+              <g key={`${si}-${f}`}>
+                {inTune && (
+                  <circle cx={cx} cy={cy} r={9} fill="var(--accent)" opacity={0.15} />
+                )}
+                <circle cx={cx} cy={cy} r={6.5}
+                  fill={inTune ? 'var(--accent)' : 'rgba(245,166,35,0.55)'}
+                  stroke={inTune ? 'rgba(255,220,120,0.7)' : 'transparent'} strokeWidth={1} />
+                <text x={cx} y={cy + 3.5} fontSize={6.5} fill={inTune ? '#1a1108' : '#f0e6d3'}
+                  textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+                  {NOTE_NAMES[(FRET_DISPLAY_STRINGS[si] + f) % 12]}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
     </div>
   )
 }
@@ -339,7 +450,8 @@ export default function App() {
   const [metroMuted, setMetroMuted] = useState(false)
   
   const beat = useMetronome(bpm, phase === 'recording' && !metroMuted, metroVolume)
-  
+  const tunerInfo = useTuner(tunerActive)
+
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
 
@@ -770,7 +882,7 @@ export default function App() {
                 </div>
               </div>
 
-              <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} />
+              <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} info={tunerInfo} />
               <SettingsWidget
                 bpm={bpm} setBpm={setBpm}
                 metroVolume={metroVolume} setMetroVolume={setMetroVolume}
@@ -781,17 +893,20 @@ export default function App() {
               <LatestStatsWidget result={latestMetrics} />
             </div>
 
-            {/* Right Panel: Conversational Chat */}
-            <ConversationalChat
-              messages={chatMessages}
-              phase={phase}
-              elapsed={elapsed}
-              pendingAudio={pendingAudio}
-              beat={beat}
-              onRecord={handleRecord}
-              onDiscardAudio={handleDiscardTake}
-              onSend={handleChatSend}
-            />
+            {/* Right column: Fretboard + Chat */}
+            <div className="right-column">
+              <FretboardVisualizer noteInfo={tunerInfo} active={tunerActive} />
+              <ConversationalChat
+                messages={chatMessages}
+                phase={phase}
+                elapsed={elapsed}
+                pendingAudio={pendingAudio}
+                beat={beat}
+                onRecord={handleRecord}
+                onDiscardAudio={handleDiscardTake}
+                onSend={handleChatSend}
+              />
+            </div>
           </div>
 
           <PaywallModal

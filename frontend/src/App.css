@@ -235,12 +235,73 @@ html, body, #root {
   -webkit-backdrop-filter: blur(6px);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Right column (fretboard + chat) ─────────────── */
+.right-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Live Fretboard Visualizer ───────────────────── */
+.fretboard-widget {
+  flex-shrink: 0;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 9, 5, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.fretboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.fretboard-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.fretboard-active-note {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  transition: color 0.2s;
+}
+
+.fretboard-hint {
+  font-size: 0.65rem;
+  color: var(--text-4);
+  font-style: italic;
+}
+
+.fretboard-svg-wrap {
+  width: 100%;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .right-column { overflow-y: auto; flex: none; }
+  .fretboard-widget { overflow-x: auto; }
+  .fretboard-svg-wrap { min-width: 460px; }
 }
 
 @media (max-width: 900px) {
   .workspace { flex-direction: column; overflow-y: auto; }
   .controls-panel { width: 100%; max-width: none; border-right: none; border-bottom: 1px solid var(--border); overflow-y: visible; }
   .session-panel { overflow-y: visible; flex: none; height: auto; }
+  .right-column { overflow-y: auto; flex: none; }
   html, body, #root { overflow: auto; }
 }
 
