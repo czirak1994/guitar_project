@@ -20,20 +20,6 @@ function metricColor(key, value) {
   return 'metric-nil'
 }
 
-export function SettingsWidget({ backingVolume, setBackingVolume }) {
-  return (
-    <div className="widget">
-      <div className="widget-title">Session Controls</div>
-      <div className="controls-grid">
-        <div className="field">
-          <label>Backing Vol</label>
-          <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function LatestStatsWidget({ result }) {
   if (!result) return null
 
