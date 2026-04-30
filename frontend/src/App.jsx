@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal } from './components/AppPanels'
+import { SettingsWidget, LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip } from './components/AppPanels'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -255,9 +255,12 @@ function TunerWidget({ active, onToggle, disabled, info }) {
     <div className="widget">
       <div className="widget-title">
         <span>Tuner</span>
-        <button className="btn" onClick={onToggle} disabled={disabled}>
-          {active ? 'Stop Tuner' : 'Start Tuner'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <SectionTooltip text="Real-time chromatic tuner. Shows you which note you're playing and whether you're in tune, sharp (too high), or flat (too low)." />
+          <button className="btn" onClick={onToggle} disabled={disabled}>
+            {active ? 'Stop Tuner' : 'Start Tuner'}
+          </button>
+        </div>
       </div>
 
       {active && info?.error && (
@@ -333,7 +336,10 @@ function FretboardVisualizer({ noteInfo, active, onToggle }) {
   return (
     <div className="fretboard-widget">
       <div className="fretboard-header">
-        <span className="fretboard-label">Live Fretboard</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span className="fretboard-label">Live Fretboard</span>
+          <SectionTooltip text="Visualizes where your current note sits on the guitar neck in real time. Works while the Tuner is active." />
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {activeNote && (
             <span className="fretboard-active-note" style={{ color: inTune ? 'var(--accent)' : 'var(--text-2)' }}>
@@ -851,7 +857,10 @@ export default function App() {
             <div className="controls-panel" style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}>
 
               <div className="widget" style={{ paddingBottom: '18px' }}>
-                <div className="widget-title">Session Context</div>
+                <div className="widget-title">
+                  <span>Session Context</span>
+                  <SectionTooltip text="Tell the AI what you're working on. The more context you give, the more personalized and useful your coaching feedback will be." />
+                </div>
                 <div className="controls-grid">
                   <div className="field">
                     <label>Focus</label>
@@ -889,7 +898,10 @@ export default function App() {
               )}
 
               <div className="widget" style={{ paddingBottom: '16px' }}>
-                <div className="widget-title">Metronome</div>
+                <div className="widget-title">
+                  <span>Metronome</span>
+                  <SectionTooltip text="Practice to a steady click track. Set your tempo (BPM) and volume, then press Start. The metronome also runs automatically while recording." />
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div className="metro-dots">
                     {[0, 1, 2, 3].map(i => (
@@ -907,16 +919,20 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <div className="metro-settings">
+                  <div className="field">
+                    <label>Tempo (BPM)</label>
+                    <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Metronome Vol</label>
+                    <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
+                  </div>
+                </div>
               </div>
 
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} info={tunerInfo} />
-              <SettingsWidget
-                bpm={bpm} setBpm={setBpm}
-                metroVolume={metroVolume} setMetroVolume={setMetroVolume}
-                backingVolume={backingVolume} setBackingVolume={setBackingVolume}
-                hasBackingTrack={!!backingTrack}
-              />
-              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} />
+              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} backingVolume={backingVolume} setBackingVolume={setBackingVolume} />
               <LatestStatsWidget result={latestMetrics} />
             </div>
 

@@ -3,6 +3,15 @@ import axios from 'axios'
 import YouTube from 'react-youtube'
 import PerformanceChart from '../PerformanceChart'
 
+export function SectionTooltip({ text }) {
+  return (
+    <span className="section-tooltip">
+      <span className="section-tooltip-icon">i</span>
+      <span className="section-tooltip-text">{text}</span>
+    </span>
+  )
+}
+
 function metricColor(key, value) {
   if (key === 'accuracy_pct') return value >= 85 ? 'metric-good' : value >= 60 ? 'metric-warn' : 'metric-bad'
   if (key === 'on_time_ratio') return value >= 0.8 ? 'metric-good' : value >= 0.5 ? 'metric-warn' : 'metric-bad'
@@ -11,25 +20,15 @@ function metricColor(key, value) {
   return 'metric-nil'
 }
 
-export function SettingsWidget({ bpm, setBpm, metroVolume, setMetroVolume, backingVolume, setBackingVolume, hasBackingTrack }) {
+export function SettingsWidget({ backingVolume, setBackingVolume }) {
   return (
     <div className="widget">
       <div className="widget-title">Session Controls</div>
       <div className="controls-grid">
         <div className="field">
-          <label>Tempo (BPM)</label>
-          <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
+          <label>Backing Vol</label>
+          <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
         </div>
-        <div className="field">
-          <label>Metronome Vol</label>
-          <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
-        </div>
-        {hasBackingTrack && (
-          <div className="field">
-            <label>Backing Vol</label>
-            <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
-          </div>
-        )}
       </div>
     </div>
   )
@@ -40,7 +39,10 @@ export function LatestStatsWidget({ result }) {
 
   return (
     <div className="widget">
-      <div className="widget-title">Latest Analysis Data</div>
+      <div className="widget-title">
+        <span>Latest Analysis Data</span>
+        <SectionTooltip text="Performance metrics from your most recent recording. Use these to track progress over time." />
+      </div>
       <div className="metrics-grid-dense">
         <div className="metric-box">
           <div className={`metric-box-val ${metricColor('accuracy_pct', result.accuracy_pct)}`}>
@@ -69,7 +71,7 @@ export function LatestStatsWidget({ result }) {
   )
 }
 
-export function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef }) {
+export function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerRef, backingVolume, setBackingVolume }) {
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
 
@@ -95,7 +97,10 @@ export function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerR
 
   return (
     <div className="widget" style={{ paddingBottom: '16px' }}>
-      <div className="widget-title">Backing Track</div>
+      <div className="widget-title">
+        <span>Backing Track</span>
+        <SectionTooltip text="Paste a YouTube URL to play along with a song or lesson video. The backing track won't be captured in your recording." />
+      </div>
       {backingTrack ? (
         <div className="yt-embed-container">
           <YouTube
@@ -103,6 +108,10 @@ export function YoutubeWidget({ backingTrack, setBackingTrack, disabled, playerR
             opts={{ height: '180', width: '100%', playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1 } }}
             onReady={onReady}
           />
+          <div className="field" style={{ marginTop: 10 }}>
+            <label>Backing Vol</label>
+            <input type="range" min="0" max="1" step="0.05" value={backingVolume} onChange={e => setBackingVolume(parseFloat(e.target.value))} />
+          </div>
           <button className="btn" style={{ marginTop: 8, width: '100%' }} onClick={() => { setBackingTrack(null); playerRef.current = null }} disabled={disabled}>Change Track</button>
         </div>
       ) : (
