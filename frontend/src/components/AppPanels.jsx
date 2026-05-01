@@ -904,20 +904,20 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
   if (!isOpen) return null
 
   const STATUS_MAP = {
-    unknown: { color: 'var(--text-3)',  icon: '○', label: 'Ismeretlen állapot' },
-    prompt:  { color: 'var(--accent)',  icon: '!', label: 'Nincs engedélyezve' },
-    granted: { color: 'var(--green)',   icon: '✓', label: 'Engedélyezve' },
-    denied:  { color: 'var(--red)',     icon: '✗', label: 'Megtagadva' },
+    unknown: { color: 'var(--text-3)',  icon: '○', label: 'Unknown' },
+    prompt:  { color: 'var(--accent)',  icon: '!', label: 'Not yet granted' },
+    granted: { color: 'var(--green)',   icon: '✓', label: 'Granted' },
+    denied:  { color: 'var(--red)',     icon: '✗', label: 'Denied' },
   }
   const s = STATUS_MAP[permStatus] || STATUS_MAP.unknown
 
   return (
     <div className="modal-overlay">
       <div className="modal-content" style={{ textAlign: 'left', maxWidth: 460 }}>
-        <h2 style={{ marginBottom: 6 }}>🎙 Mikrofon beállítás</h2>
+        <h2 style={{ marginBottom: 6 }}>🎙 Microphone Setup</h2>
         <p>
-          Engedélyezd a mikrofon hozzáférést, majd válaszd ki, melyik eszközt
-          használja az alkalmazás a felvételekhez és a hangolóhoz.
+          Grant microphone access, then choose which input device the app
+          uses for recordings and the tuner.
         </p>
 
         {/* Permission status row */}
@@ -928,7 +928,7 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
         }}>
           <span style={{ color: s.color, fontSize: '1.1rem', lineHeight: 1, fontWeight: 700 }}>{s.icon}</span>
           <div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Böngésző engedély</div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Browser permission</div>
             <div style={{ color: s.color, fontWeight: 600, fontSize: '0.88rem' }}>{s.label}</div>
           </div>
           {permStatus !== 'granted' && permStatus !== 'denied' && (
@@ -938,7 +938,7 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
               onClick={requestPermission}
               disabled={requesting}
             >
-              {requesting ? 'Kérés...' : 'Engedélyezés'}
+              {requesting ? 'Requesting…' : 'Allow access'}
             </button>
           )}
           {permStatus === 'granted' && (
@@ -947,7 +947,7 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
               style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: '0.82rem' }}
               onClick={loadDevices}
             >
-              Frissítés
+              Refresh
             </button>
           )}
         </div>
@@ -959,10 +959,9 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
             background: 'var(--red-dim)', border: '1px solid rgba(232,64,64,0.25)',
             borderRadius: 8, fontSize: '0.82rem', lineHeight: 1.6,
           }}>
-            <strong style={{ color: 'var(--text-1)' }}>A hozzáférés meg lett tagadva.</strong>
+            <strong style={{ color: 'var(--text-1)' }}>Microphone access was blocked.</strong>
             <div style={{ color: 'var(--text-2)', marginTop: 4 }}>
-              Böngésző cím&shy;sor → 🔒 Lakat ikon → <strong>Mikrofon</strong> → <strong>Engedélyezés</strong> →
-              töltsd újra az oldalt.
+              Click the 🔒 lock icon in the address bar → <strong>Microphone</strong> → <strong>Allow</strong> → reload the page.
             </div>
           </div>
         )}
@@ -974,10 +973,10 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
             background: 'var(--accent-soft)', border: '1px solid var(--border)',
             borderRadius: 8, fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--text-2)',
           }}>
-            Kattints az <strong style={{ color: 'var(--accent)' }}>Engedélyezés</strong> gombra,
-            majd a böngésző felugró ablakában is fogadd el a mikrofon hozzáférést.
-            Ha nem jelenik meg semmi, keresd a cím&shy;sor mellett a{' '}
-            <strong style={{ color: 'var(--text-1)' }}>🔒 / 🎙</strong> ikont.
+            Click <strong style={{ color: 'var(--accent)' }}>Allow access</strong> above,
+            then accept the browser permission popup that appears.
+            If nothing happens, look for the{' '}
+            <strong style={{ color: 'var(--text-1)' }}>🔒 / 🎙</strong> icon next to the address bar.
           </div>
         )}
 
@@ -988,17 +987,17 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
               display: 'block', fontSize: '0.68rem', color: 'var(--text-3)',
               textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8,
             }}>
-              Hangbemeneti eszköz
+              Audio input device
             </label>
             <select
               className="input-field"
               value={selectedDeviceId || ''}
               onChange={e => onDeviceChange(e.target.value || null)}
             >
-              <option value="">Alapértelmezett eszköz</option>
+              <option value="">Default device</option>
               {devices.map(d => (
                 <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `Mikrofon (${d.deviceId.slice(0, 8)}…)`}
+                  {d.label || `Microphone (${d.deviceId.slice(0, 8)}…)`}
                 </option>
               ))}
             </select>
@@ -1007,7 +1006,7 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
 
         {permStatus === 'granted' && devices.length === 0 && (
           <div style={{ marginBottom: 16, color: 'var(--text-3)', fontSize: '0.84rem' }}>
-            Nem található hangbemeneti eszköz.
+            No audio input devices found.
           </div>
         )}
 
@@ -1016,7 +1015,7 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
           style={{ width: '100%', padding: '10px', fontSize: '0.9rem' }}
           onClick={onClose}
         >
-          Kész
+          Done
         </button>
       </div>
     </div>

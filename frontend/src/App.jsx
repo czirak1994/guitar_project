@@ -948,7 +948,7 @@ export default function App() {
                   style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                   onClick={() => setMicSetupOpen(true)}
                 >
-                  🎙 Mikrofon beállítás{selectedDeviceId ? ' ✓' : ''}
+                  🎙 Microphone setup{selectedDeviceId ? ' ✓' : ''}
                 </button>
               </div>
             </div>
