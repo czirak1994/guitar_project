@@ -45,7 +45,6 @@ export function LatestStatsWidget({ result }) {
     <div className="widget">
       <div className="widget-title">
         <span>Latest Analysis Data</span>
-        <SectionTooltip text="Performance metrics from your most recent recording. Use these to track progress over time." />
       </div>
       <div className="metrics-grid-dense">
         <div className="metric-box">
@@ -534,7 +533,7 @@ function AIChatBubble({ message }) {
 }
 
 // ── ConversationalChat ────────────────────────────────────────────────────────
-export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend }) {
+export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, panelEverOpened, onExpandPanel }) {
   const [text, setText] = useState('')
   const bottomRef = useRef(null)
 
@@ -599,11 +598,12 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
                   maxWidth: '75%',
                   padding: '10px 16px',
                   background: 'var(--accent)',
-                  color: '#fff',
+                  color: '#1a0f00',
                   borderRadius: '16px 16px 4px 16px',
                   fontSize: '0.88rem',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',
+                  fontWeight: 500,
                 }}>
                   {m.text}
                 </div>
@@ -616,6 +616,18 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
             <AIChatBubble key={m.id || i} message={m} />
           )
         ))}
+
+        {/* Refine-feedback prompt — shown once after first completed AI response */}
+        {onExpandPanel &&
+         !panelEverOpened &&
+         messages.length > 0 &&
+         messages[messages.length - 1]?.role === 'assistant' &&
+         messages[messages.length - 1]?.status === 'done' && (
+          <div className="refine-prompt">
+            <span>Want more precise feedback?</span>
+            <button onClick={onExpandPanel}>Add tempo / key / style →</button>
+          </div>
+        )}
 
         <div ref={bottomRef} />
       </div>

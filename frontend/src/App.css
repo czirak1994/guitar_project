@@ -915,3 +915,186 @@ input[type="range"] {
 
 /* ── YouTube embed ──────────────────────────────── */
 .yt-embed-container { width: 100%; }
+
+/* ── Hero Screen ────────────────────────────────── */
+.hero-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 40px 24px;
+}
+
+.hero-headline {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+  color: var(--text-1);
+  letter-spacing: -0.5px;
+}
+
+.hero-sub {
+  font-size: 1rem;
+  color: var(--text-3);
+  letter-spacing: 0.5px;
+  margin-top: -8px;
+}
+
+.hero-record-btn {
+  font-size: 1.25rem;
+  font-weight: 700;
+  padding: 18px 64px;
+  border-radius: 999px;
+  border: 2px solid var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  letter-spacing: 1px;
+  font-family: inherit;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 0 32px rgba(245,166,35,0.12);
+}
+.hero-record-btn:hover:not(:disabled) {
+  background: rgba(245,166,35,0.2);
+  transform: scale(1.03);
+  box-shadow: 0 0 48px rgba(245,166,35,0.22);
+}
+.hero-record-btn:active:not(:disabled) { transform: scale(0.98); }
+.hero-record-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.hero-record-btn--counting {
+  animation: pulse 1s ease-in-out infinite;
+  color: var(--text-2);
+  border-color: var(--text-3);
+}
+
+.hero-ask-link {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0;
+}
+.hero-ask-link:hover { color: var(--text-2); }
+
+.hero-ask-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  width: 100%;
+  max-width: 520px;
+}
+
+/* Hero — after first action (chat mode) */
+.hero-active-chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.hero-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 0;
+}
+
+.hero-input-area {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+  flex-shrink: 0;
+}
+
+/* ── Collapsible Left Panel ─────────────────────── */
+.controls-panel--collapsed {
+  width: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.panel-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 14px 0;
+  width: 100%;
+  letter-spacing: 0.5px;
+  transition: color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel-toggle-btn:hover { color: var(--text-2); }
+
+/* collapsed: rotated label */
+.controls-panel--collapsed .panel-toggle-btn {
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  height: 100%;
+  padding: 16px 10px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  white-space: nowrap;
+}
+
+/* open: horizontal header */
+.controls-panel--open .panel-toggle-btn {
+  writing-mode: horizontal-tb;
+  transform: none;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  justify-content: space-between;
+}
+
+/* ── Refine-feedback inline prompt ──────────────── */
+.refine-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 4px 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.84rem;
+  color: var(--text-2);
+}
+.refine-prompt button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.refine-prompt button:hover { color: #FFB83A; }

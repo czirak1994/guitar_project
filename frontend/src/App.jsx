@@ -431,6 +431,120 @@ function FretboardVisualizer({ noteInfo, active, onToggle }) {
   )
 }
 
+// ── Hero Screen (first visit) ─────────────────────────────────────────────────
+function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, chatMessages }) {
+  const [askMode, setAskMode] = useState(false)
+  const [text, setText] = useState('')
+  const isRecording = phase === 'recording'
+  const isCountdown = phase === 'countdown'
+  const isBusy      = isCountdown || phase === 'analyzing'
+  const hasAudio    = !!pendingAudio
+  const hasActivity = chatMessages.length > 0 || hasAudio || isRecording || isCountdown
+
+  const handleSend = () => {
+    if (!text.trim() && !hasAudio) return
+    onSend(text.trim(), pendingAudio || null)
+    setText('')
+  }
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }
+
+  if (hasActivity) {
+    // After first action, show a minimal single-column chat view
+    return (
+      <div className="hero-active-chat">
+        <div className="hero-chat-messages">
+          {chatMessages.map((m, i) =>
+            m.role === 'user' ? (
+              <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                {m.text && (
+                  <div style={{ maxWidth: '75%', padding: '10px 16px', background: 'var(--accent)', color: '#1a0f00', borderRadius: '16px 16px 4px 16px', fontSize: '0.88rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontWeight: 500 }}>
+                    {m.text}
+                  </div>
+                )}
+                {m.audio_url && <audio src={m.audio_url} controls style={{ maxWidth: '100%', height: 36, opacity: 0.85 }} />}
+              </div>
+            ) : (
+              <AIChatBubble key={m.id || i} message={m} />
+            )
+          )}
+        </div>
+
+        <div className="hero-input-area">
+          {hasAudio && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 12px', background: 'var(--bg-deep)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-2)', flex: 1 }}>🎙 Recording ready · {elapsed.toFixed(1)}s</span>
+              <audio src={pendingAudio.url} controls style={{ height: 28 }} />
+              <button onClick={onDiscardAudio} style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '1.1rem', padding: '0 4px' }}>×</button>
+            </div>
+          )}
+          {isRecording && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.82rem', color: 'var(--red)' }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulse 1s ease-in-out infinite' }} />
+              Recording · {elapsed.toFixed(1)}s — click stop when done
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder={isRecording ? 'Recording in progress…' : hasAudio ? 'Add a note (optional) then Send…' : 'Ask a follow-up question…'}
+              rows={2}
+              disabled={isRecording || isBusy}
+              className="input-field"
+              style={{ flex: 1, resize: 'none', fontSize: '0.88rem' }}
+            />
+            <button onClick={onRecord} disabled={isBusy || hasAudio} title={isRecording ? 'Stop' : 'Record'}
+              style={{ padding: '8px 12px', borderRadius: 8, border: `1px solid ${isRecording ? 'var(--red)' : 'var(--border)'}`, background: isRecording ? 'rgba(220,50,50,0.12)' : 'var(--bg-deep)', color: isRecording ? 'var(--red)' : 'var(--text-2)', cursor: (isBusy || hasAudio) ? 'not-allowed' : 'pointer', fontSize: '1.1rem', lineHeight: 1, flexShrink: 0, alignSelf: 'flex-end', opacity: (isBusy || hasAudio) ? 0.4 : 1 }}>
+              {isRecording ? '⏹' : '🎙'}
+            </button>
+            <button className="btn-primary" onClick={handleSend} disabled={(!text.trim() && !hasAudio) || isRecording || isBusy} style={{ alignSelf: 'flex-end', padding: '8px 18px' }}>
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="hero-screen">
+      <h1 className="hero-headline">Play something.<br />I'll tell you what to fix.</h1>
+      <p className="hero-sub">No setup needed.</p>
+
+      <button className={`hero-record-btn${isCountdown ? ' hero-record-btn--counting' : ''}`} onClick={onRecord} disabled={isBusy}>
+        {isCountdown ? '…' : '● Record'}
+      </button>
+
+      {!askMode && (
+        <button className="hero-ask-link" onClick={() => setAskMode(true)}>
+          Or ask a question
+        </button>
+      )}
+
+      {askMode && (
+        <div className="hero-ask-row">
+          <textarea
+            className="input-field"
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Ask anything about your playing…"
+            rows={2}
+            autoFocus
+            style={{ flex: 1, resize: 'none', fontSize: '0.88rem' }}
+          />
+          <button className="btn-primary" onClick={handleSend} disabled={!text.trim()} style={{ padding: '8px 18px' }}>
+            Ask
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const { getToken, isLoaded, isSignedIn } = useSafeAuth()
@@ -477,6 +591,13 @@ export default function App() {
   const [metroEnabled, setMetroEnabled] = useState(false)
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   const [micSetupOpen, setMicSetupOpen] = useState(false)
+
+  // Progressive disclosure state
+  const [hasEverRecorded, setHasEverRecorded] = useState(
+    () => localStorage.getItem('ts_has_recorded') === '1'
+  )
+  const [leftPanelOpen, setLeftPanelOpen] = useState(false)
+  const [panelEverOpened, setPanelEverOpened] = useState(false)
   
   const beat = useMetronome(bpm, (metroEnabled || phase === 'recording') && !metroMuted, metroVolume)
   const tunerInfo = useTuner(tunerActive, selectedDeviceId)
@@ -638,6 +759,11 @@ export default function App() {
             setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
               ...m, status: 'done', ai_data: data.ai_advice, text: null,
             } : m))
+            // Progressive disclosure: unlock full layout after first successful AI result
+            if (!hasEverRecorded) {
+              setHasEverRecorded(true)
+              localStorage.setItem('ts_has_recorded', '1')
+            }
           } else {
             setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
               ...m, status: 'error', text: 'AI analysis failed. Please try again.',
@@ -859,114 +985,150 @@ export default function App() {
           )}
 
           <div className="workspace">
-            {/* Left Panel: Context & Controls */}
-            <div className="controls-panel" style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}>
-
-              <div className="widget" style={{ paddingBottom: '18px' }}>
-                <div className="widget-title">
-                  <span>Session Context</span>
-                  <SectionTooltip text="Tell the AI what you're working on. The more context you give, the more personalized and useful your coaching feedback will be." />
-                </div>
-                <div className="controls-grid">
-                  <div className="field">
-                    <label>Focus</label>
-                    <select value={focusArea} onChange={(e) => setFocusArea(e.target.value)}>
-                      <option value="overall">Overall</option>
-                      <option value="Timing">Timing</option>
-                      <option value="Rhythm">Rhythm</option>
-                      <option value="Technique">Technique</option>
-                      <option value="Tone">Tone</option>
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Style</label>
-                    <input className="input-field" type="text" placeholder="e.g. Metal, Blues, Jazz" value={guitarStyle} onChange={(e) => setGuitarStyle(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Scale / Key <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.78rem' }}>(optional)</span></label>
-                    <input className="input-field" type="text" placeholder="e.g. A minor, C major" value={scaleKey} onChange={(e) => setScaleKey(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Rhythm / Tempo <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.78rem' }}>(optional)</span></label>
-                    <input className="input-field" type="text" placeholder="e.g. 16th note at 90 BPM" value={rhythmInfo} onChange={(e) => setRhythmInfo(e.target.value)} />
-                  </div>
-                </div>
-              </div>
-
-              {profile && profile.skill_level && (
-                <div className="widget dashboard-habit-widget">
-                  <div className="habit-header">
-                    <span className="habit-streak">🔥 Streak: {profile.streak_days || 0} Days</span>
-                    <span className="habit-focus-label">Current Focus</span>
-                  </div>
-                  <div className="habit-focus-text">{profile.current_focus}</div>
-                </div>
-              )}
-
-              <div className="widget" style={{ paddingBottom: '16px' }}>
-                <div className="widget-title">
-                  <span>Metronome</span>
-                  <SectionTooltip text="Practice to a steady click track. Set your tempo (BPM) and volume, then press Start. The metronome also runs automatically while recording." />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div className="metro-dots">
-                    {[0, 1, 2, 3].map(i => (
-                      <span key={i} className={`metro-dot ${beat === i ? (i === 0 ? 'accent' : 'active') : ''}`} />
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                      onClick={() => setMetroEnabled(e => !e)}>
-                      {metroEnabled ? 'Stop' : 'Start'}
-                    </button>
-                    <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                      onClick={() => setMetroMuted(m => !m)}>
-                      {metroMuted ? 'Unmute' : 'Mute'}
-                    </button>
-                  </div>
-                </div>
-                <div className="metro-settings">
-                  <div className="field">
-                    <label>Tempo (BPM)</label>
-                    <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Metronome Vol</label>
-                    <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
-                  </div>
-                </div>
-              </div>
-
-              <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} info={tunerInfo} />
-              <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} backingVolume={backingVolume} setBackingVolume={setBackingVolume} />
-              <LatestStatsWidget result={latestMetrics} />
-
-              {/* Microphone setup button */}
-              <div className="widget" style={{ paddingTop: 12, paddingBottom: 12 }}>
-                <button
-                  className="btn"
-                  style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                  onClick={() => setMicSetupOpen(true)}
-                >
-                  🎙 Microphone setup{selectedDeviceId ? ' ✓' : ''}
-                </button>
-              </div>
-            </div>
-
-            {/* Right column: Fretboard + Chat */}
-            <div className="right-column">
-              <FretboardVisualizer noteInfo={fretboardInfo} active={fretboardActive} onToggle={() => setFretboardActive(a => !a)} />
-              <ConversationalChat
-                messages={chatMessages}
+            {!hasEverRecorded ? (
+              /* ── FIRST-VISIT: Hero screen, no left panel ── */
+              <HeroScreen
                 phase={phase}
                 elapsed={elapsed}
                 pendingAudio={pendingAudio}
-                beat={beat}
                 onRecord={handleRecord}
                 onDiscardAudio={handleDiscardTake}
                 onSend={handleChatSend}
+                chatMessages={chatMessages}
               />
-            </div>
+            ) : (
+              /* ── RETURNING: Full layout with collapsible panel ── */
+              <>
+                {/* Left Panel — collapsible */}
+                <div
+                  className={`controls-panel ${leftPanelOpen ? 'controls-panel--open' : 'controls-panel--collapsed'}`}
+                  style={{ pointerEvents: phase === 'countdown' ? 'none' : 'auto' }}
+                >
+                  <button
+                    className="panel-toggle-btn"
+                    onClick={() => {
+                      setLeftPanelOpen(o => !o)
+                      setPanelEverOpened(true)
+                    }}
+                  >
+                    {leftPanelOpen ? (
+                      <><span>Improve feedback accuracy</span><span style={{ fontSize: '0.8rem' }}>◀</span></>
+                    ) : (
+                      '▶ Improve feedback accuracy'
+                    )}
+                  </button>
+
+                  {leftPanelOpen && (
+                    <>
+                      <div className="widget" style={{ paddingBottom: '18px' }}>
+                        <div className="widget-title">
+                          <span>Optional context</span>
+                        </div>
+                        <div className="controls-grid">
+                          <div className="field">
+                            <label>Style focus (optional)</label>
+                            <select value={focusArea} onChange={(e) => setFocusArea(e.target.value)}>
+                              <option value="overall">Overall</option>
+                              <option value="Timing">Timing</option>
+                              <option value="Rhythm">Rhythm</option>
+                              <option value="Technique">Technique</option>
+                              <option value="Tone">Tone</option>
+                            </select>
+                          </div>
+                          <div className="field">
+                            <label>Genre (optional)</label>
+                            <input className="input-field" type="text" placeholder="e.g. Metal, Blues, Jazz" value={guitarStyle} onChange={(e) => setGuitarStyle(e.target.value)} />
+                          </div>
+                          <div className="field">
+                            <label>Key (optional)</label>
+                            <input className="input-field" type="text" placeholder="e.g. A minor, C major" value={scaleKey} onChange={(e) => setScaleKey(e.target.value)} />
+                          </div>
+                          <div className="field">
+                            <label>Tempo context (optional)</label>
+                            <input className="input-field" type="text" placeholder="e.g. 16th note at 90 BPM" value={rhythmInfo} onChange={(e) => setRhythmInfo(e.target.value)} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {profile && profile.skill_level && (
+                        <div className="widget dashboard-habit-widget">
+                          <div className="habit-header">
+                            <span className="habit-streak">🔥 Streak: {profile.streak_days || 0} Days</span>
+                            <span className="habit-focus-label">Current Focus</span>
+                          </div>
+                          <div className="habit-focus-text">{profile.current_focus}</div>
+                        </div>
+                      )}
+
+                      <div className="widget" style={{ paddingBottom: '16px' }}>
+                        <div className="widget-title">
+                          <span>Metronome</span>
+                          <SectionTooltip text="Practice to a steady click track. Set your tempo (BPM) and volume, then press Start. The metronome also runs automatically while recording." />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div className="metro-dots">
+                            {[0, 1, 2, 3].map(i => (
+                              <span key={i} className={`metro-dot ${beat === i ? (i === 0 ? 'accent' : 'active') : ''}`} />
+                            ))}
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => setMetroEnabled(e => !e)}>
+                              {metroEnabled ? 'Stop' : 'Start'}
+                            </button>
+                            <button className="btn" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => setMetroMuted(m => !m)}>
+                              {metroMuted ? 'Unmute' : 'Mute'}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="metro-settings">
+                          <div className="field">
+                            <label>Tempo (BPM)</label>
+                            <input type="number" min="40" max="240" value={bpm} onChange={e => setBpm(e.target.value)} />
+                          </div>
+                          <div className="field">
+                            <label>Metronome Vol</label>
+                            <input type="range" min="0" max="1" step="0.05" value={metroVolume} onChange={e => setMetroVolume(parseFloat(e.target.value))} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} info={tunerInfo} />
+                      <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} backingVolume={backingVolume} setBackingVolume={setBackingVolume} />
+                      <LatestStatsWidget result={latestMetrics} />
+
+                      <div className="widget" style={{ paddingTop: 12, paddingBottom: 12 }}>
+                        <button
+                          className="btn"
+                          style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                          onClick={() => setMicSetupOpen(true)}
+                        >
+                          🎙 Microphone setup{selectedDeviceId ? ' ✓' : ''}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Right column: Fretboard + Chat */}
+                <div className="right-column">
+                  {(fretboardActive || tunerActive) && (
+                    <FretboardVisualizer noteInfo={fretboardInfo} active={fretboardActive} onToggle={() => setFretboardActive(a => !a)} />
+                  )}
+                  <ConversationalChat
+                    messages={chatMessages}
+                    phase={phase}
+                    elapsed={elapsed}
+                    pendingAudio={pendingAudio}
+                    beat={beat}
+                    onRecord={handleRecord}
+                    onDiscardAudio={handleDiscardTake}
+                    onSend={handleChatSend}
+                    panelEverOpened={panelEverOpened}
+                    onExpandPanel={() => { setLeftPanelOpen(true); setPanelEverOpened(true) }}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <PaywallModal
