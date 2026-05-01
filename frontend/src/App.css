@@ -226,6 +226,9 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  overflow-x: visible;
+  position: relative;
+  z-index: 1;
 }
 
 .session-panel {
