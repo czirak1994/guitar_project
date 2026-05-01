@@ -557,13 +557,10 @@ input[type="range"] {
   border-color: var(--text-3);
   color: var(--text-3);
 }
-.section-tooltip-text {
-  visibility: hidden;
-  opacity: 0;
-  position: absolute;
-  left: 0;
-  top: calc(100% + 6px);
-  z-index: 100;
+/* portal-based tooltip — rendered into document.body, position: fixed */
+.section-tooltip-text--portal {
+  position: fixed;
+  z-index: 9999;
   background: rgba(28, 22, 14, 0.97);
   border: 1px solid var(--border-hi);
   border-radius: var(--radius-sm);
@@ -575,14 +572,9 @@ input[type="range"] {
   width: 220px;
   pointer-events: none;
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-  transition: opacity 0.15s;
   font-weight: 400;
   text-transform: none;
   letter-spacing: 0;
-}
-.section-tooltip:hover .section-tooltip-text {
-  visibility: visible;
-  opacity: 1;
 }
 
 /* ── Metronome ──────────────────────────────────── */

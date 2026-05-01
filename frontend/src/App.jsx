@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip } from './components/AppPanels'
+import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal } from './components/AppPanels'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -153,7 +153,7 @@ function autocorrelate(buf, sampleRate) {
   return { freq: sampleRate / refined, rms }
 }
 
-function useTuner(enabled) {
+function useTuner(enabled, deviceId = null) {
   const [info, setInfo] = useState(null)
   const streamRef   = useRef(null)
   const animRef     = useRef(null)
@@ -169,7 +169,9 @@ function useTuner(enabled) {
     }
 
     let alive = true
-    const constraints = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, latency: 0 } }
+    const audioConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, latency: 0 }
+    if (deviceId) audioConstraints.deviceId = { exact: deviceId }
+    const constraints = { audio: audioConstraints }
     
     navigator.mediaDevices.getUserMedia(constraints)
       .then(stream => {
@@ -209,7 +211,7 @@ function useTuner(enabled) {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
       if (ctxRef.current) ctxRef.current.close().catch(() => {})
     }
-  }, [enabled])
+  }, [enabled, deviceId])
 
   return info
 }
@@ -473,10 +475,12 @@ export default function App() {
   const [fretboardActive, setFretboardActive] = useState(false)
   const [metroMuted, setMetroMuted] = useState(false)
   const [metroEnabled, setMetroEnabled] = useState(false)
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null)
+  const [micSetupOpen, setMicSetupOpen] = useState(false)
   
   const beat = useMetronome(bpm, (metroEnabled || phase === 'recording') && !metroMuted, metroVolume)
-  const tunerInfo = useTuner(tunerActive)
-  const fretboardInfo = useTuner(fretboardActive)
+  const tunerInfo = useTuner(tunerActive, selectedDeviceId)
+  const fretboardInfo = useTuner(fretboardActive, selectedDeviceId)
 
   const inFlightRef = useRef(false)
   const recordingRef = useRef(null)
@@ -536,7 +540,9 @@ export default function App() {
     setElapsed(0)
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      const audioConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      if (selectedDeviceId) audioConstraints.deviceId = { exact: selectedDeviceId }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
       
       setPhase('countdown')
@@ -934,6 +940,17 @@ export default function App() {
               <TunerWidget active={tunerActive} onToggle={() => setTunerActive(a => !a)} disabled={phase === 'recording' || phase === 'countdown'} info={tunerInfo} />
               <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} backingVolume={backingVolume} setBackingVolume={setBackingVolume} />
               <LatestStatsWidget result={latestMetrics} />
+
+              {/* Microphone setup button */}
+              <div className="widget" style={{ paddingTop: 12, paddingBottom: 12 }}>
+                <button
+                  className="btn"
+                  style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                  onClick={() => setMicSetupOpen(true)}
+                >
+                  🎙 Mikrofon beállítás{selectedDeviceId ? ' ✓' : ''}
+                </button>
+              </div>
             </div>
 
             {/* Right column: Fretboard + Chat */}
@@ -956,6 +973,13 @@ export default function App() {
             isOpen={phase === 'paywall'}
             onContinueFree={() => setPhase('idle')}
             getToken={getToken}
+          />
+
+          <MicrophoneSetupModal
+            isOpen={micSetupOpen}
+            onClose={() => setMicSetupOpen(false)}
+            selectedDeviceId={selectedDeviceId}
+            onDeviceChange={setSelectedDeviceId}
           />
 
           <GuestLimitModal

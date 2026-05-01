@@ -1,13 +1,31 @@
 import { useState, useRef, useEffect } from 'react'
+import ReactDOM from 'react-dom'
 import axios from 'axios'
 import YouTube from 'react-youtube'
 import PerformanceChart from '../PerformanceChart'
 
 export function SectionTooltip({ text }) {
+  const [visible, setVisible] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const iconRef = useRef(null)
+
+  const show = () => {
+    if (!iconRef.current) return
+    const r = iconRef.current.getBoundingClientRect()
+    setPos({ top: r.bottom + 6, left: r.left })
+    setVisible(true)
+  }
+  const hide = () => setVisible(false)
+
   return (
-    <span className="section-tooltip">
-      <span className="section-tooltip-icon">i</span>
-      <span className="section-tooltip-text">{text}</span>
+    <span className="section-tooltip" onMouseEnter={show} onMouseLeave={hide}>
+      <span ref={iconRef} className="section-tooltip-icon">i</span>
+      {visible && ReactDOM.createPortal(
+        <span className="section-tooltip-text section-tooltip-text--portal" style={{ top: pos.top, left: pos.left }}>
+          {text}
+        </span>,
+        document.body
+      )}
     </span>
   )
 }
@@ -828,6 +846,177 @@ export function ChatPanel({ sessionId, getToken, context = {}, initialMessages =
           className="btn-primary"
         >
           Send
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── MicrophoneSetupModal ──────────────────────────────────────────────────────
+export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDeviceChange }) {
+  const [permStatus, setPermStatus] = useState('unknown') // unknown | prompt | granted | denied
+  const [devices, setDevices] = useState([])
+  const [requesting, setRequesting] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    checkPermission()
+  }, [isOpen])
+
+  const loadDevices = async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices()
+      const inputs = all.filter(d => d.kind === 'audioinput' && d.deviceId)
+      setDevices(inputs)
+    } catch { /* ignore */ }
+  }
+
+  const checkPermission = async () => {
+    if (navigator.permissions) {
+      try {
+        const result = await navigator.permissions.query({ name: 'microphone' })
+        setPermStatus(result.state)
+        if (result.state === 'granted') await loadDevices()
+        result.onchange = async () => {
+          setPermStatus(result.state)
+          if (result.state === 'granted') await loadDevices()
+        }
+        return
+      } catch { /* permissions API unavailable */ }
+    }
+    await loadDevices()
+  }
+
+  const requestPermission = async () => {
+    setRequesting(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach(t => t.stop())
+      setPermStatus('granted')
+      await loadDevices()
+    } catch {
+      setPermStatus('denied')
+    } finally {
+      setRequesting(false)
+    }
+  }
+
+  if (!isOpen) return null
+
+  const STATUS_MAP = {
+    unknown: { color: 'var(--text-3)',  icon: '○', label: 'Ismeretlen állapot' },
+    prompt:  { color: 'var(--accent)',  icon: '!', label: 'Nincs engedélyezve' },
+    granted: { color: 'var(--green)',   icon: '✓', label: 'Engedélyezve' },
+    denied:  { color: 'var(--red)',     icon: '✗', label: 'Megtagadva' },
+  }
+  const s = STATUS_MAP[permStatus] || STATUS_MAP.unknown
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ textAlign: 'left', maxWidth: 460 }}>
+        <h2 style={{ marginBottom: 6 }}>🎙 Mikrofon beállítás</h2>
+        <p>
+          Engedélyezd a mikrofon hozzáférést, majd válaszd ki, melyik eszközt
+          használja az alkalmazás a felvételekhez és a hangolóhoz.
+        </p>
+
+        {/* Permission status row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '10px 14px', marginBottom: 14,
+          background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8,
+        }}>
+          <span style={{ color: s.color, fontSize: '1.1rem', lineHeight: 1, fontWeight: 700 }}>{s.icon}</span>
+          <div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Böngésző engedély</div>
+            <div style={{ color: s.color, fontWeight: 600, fontSize: '0.88rem' }}>{s.label}</div>
+          </div>
+          {permStatus !== 'granted' && permStatus !== 'denied' && (
+            <button
+              className="btn"
+              style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: '0.82rem' }}
+              onClick={requestPermission}
+              disabled={requesting}
+            >
+              {requesting ? 'Kérés...' : 'Engedélyezés'}
+            </button>
+          )}
+          {permStatus === 'granted' && (
+            <button
+              className="btn"
+              style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: '0.82rem' }}
+              onClick={loadDevices}
+            >
+              Frissítés
+            </button>
+          )}
+        </div>
+
+        {/* Denied help text */}
+        {permStatus === 'denied' && (
+          <div style={{
+            marginBottom: 14, padding: '10px 14px',
+            background: 'var(--red-dim)', border: '1px solid rgba(232,64,64,0.25)',
+            borderRadius: 8, fontSize: '0.82rem', lineHeight: 1.6,
+          }}>
+            <strong style={{ color: 'var(--text-1)' }}>A hozzáférés meg lett tagadva.</strong>
+            <div style={{ color: 'var(--text-2)', marginTop: 4 }}>
+              Böngésző cím&shy;sor → 🔒 Lakat ikon → <strong>Mikrofon</strong> → <strong>Engedélyezés</strong> →
+              töltsd újra az oldalt.
+            </div>
+          </div>
+        )}
+
+        {/* Browser-specific help for not-yet-granted */}
+        {(permStatus === 'unknown' || permStatus === 'prompt') && !requesting && (
+          <div style={{
+            marginBottom: 14, padding: '10px 14px',
+            background: 'var(--accent-soft)', border: '1px solid var(--border)',
+            borderRadius: 8, fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--text-2)',
+          }}>
+            Kattints az <strong style={{ color: 'var(--accent)' }}>Engedélyezés</strong> gombra,
+            majd a böngésző felugró ablakában is fogadd el a mikrofon hozzáférést.
+            Ha nem jelenik meg semmi, keresd a cím&shy;sor mellett a{' '}
+            <strong style={{ color: 'var(--text-1)' }}>🔒 / 🎙</strong> ikont.
+          </div>
+        )}
+
+        {/* Device selector */}
+        {devices.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <label style={{
+              display: 'block', fontSize: '0.68rem', color: 'var(--text-3)',
+              textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8,
+            }}>
+              Hangbemeneti eszköz
+            </label>
+            <select
+              className="input-field"
+              value={selectedDeviceId || ''}
+              onChange={e => onDeviceChange(e.target.value || null)}
+            >
+              <option value="">Alapértelmezett eszköz</option>
+              {devices.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Mikrofon (${d.deviceId.slice(0, 8)}…)`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {permStatus === 'granted' && devices.length === 0 && (
+          <div style={{ marginBottom: 16, color: 'var(--text-3)', fontSize: '0.84rem' }}>
+            Nem található hangbemeneti eszköz.
+          </div>
+        )}
+
+        <button
+          className="btn"
+          style={{ width: '100%', padding: '10px', fontSize: '0.9rem' }}
+          onClick={onClose}
+        >
+          Kész
         </button>
       </div>
     </div>
