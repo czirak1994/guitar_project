@@ -440,8 +440,8 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
   )
 }
 
-// ── AIChatBubble (internal helper) ───────────────────────────────────────────
-function AIChatBubble({ message }) {
+// ── AIChatBubble ─────────────────────────────────────────────────────────────
+export function AIChatBubble({ message }) {
   if (message.status === 'analyzing') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
