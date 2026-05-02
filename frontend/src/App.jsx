@@ -432,7 +432,7 @@ function FretboardVisualizer({ noteInfo, active, onToggle }) {
 }
 
 // ── Hero Screen (first visit) ─────────────────────────────────────────────────
-function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, chatMessages }) {
+function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, chatMessages, isFirstVisit }) {
   const [askMode, setAskMode] = useState(false)
   const [text, setText] = useState('')
   const isRecording = phase === 'recording'
@@ -514,7 +514,19 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
       <h1 className="hero-headline">Play something.<br />I'll tell you what to fix.</h1>
       <p className="hero-sub">No setup needed.</p>
 
-      <button className={`hero-record-btn${isCountdown ? ' hero-record-btn--counting' : ''}`} onClick={onRecord} disabled={isBusy}>
+      {isFirstVisit && (
+        <div className="hero-first-hint">
+          <p>Play anything for&nbsp;~10 seconds.</p>
+          <p>I'll tell you if you're early, late, or hitting wrong notes.</p>
+          <p>Then try it again and see if you improve.</p>
+        </div>
+      )}
+
+      <button
+        className={`hero-record-btn${isCountdown ? ' hero-record-btn--counting' : ''}${isFirstVisit && !isBusy ? ' hero-record-btn--pulse' : ''}`}
+        onClick={onRecord}
+        disabled={isBusy}
+      >
         {isCountdown ? '…' : '● Record'}
       </button>
 
@@ -995,6 +1007,7 @@ export default function App() {
                 onDiscardAudio={handleDiscardTake}
                 onSend={handleChatSend}
                 chatMessages={chatMessages}
+                isFirstVisit={true}
               />
             ) : (
               /* ── RETURNING: Full layout with collapsible panel ── */
