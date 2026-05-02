@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
-import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble } from './components/AppPanels'
+import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -432,7 +432,7 @@ function FretboardVisualizer({ noteInfo, active, onToggle }) {
 }
 
 // ── Hero Screen (first visit) ─────────────────────────────────────────────────
-function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, chatMessages, isFirstVisit }) {
+function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, chatMessages, isFirstVisit, onShowDemo }) {
   const [askMode, setAskMode] = useState(false)
   const [text, setText] = useState('')
   const isRecording = phase === 'recording'
@@ -531,9 +531,31 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
       </button>
 
       {!askMode && (
-        <button className="hero-ask-link" onClick={() => setAskMode(true)}>
-          Or ask a question
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <button className="hero-ask-link" onClick={() => setAskMode(true)}>
+            Or ask a question
+          </button>
+          <button
+            id="demo-feedback-btn"
+            className="hero-ask-link"
+            onClick={onShowDemo}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              color: 'var(--text-2)',
+              fontSize: '0.84rem',
+              padding: '6px 14px',
+              border: '1px solid var(--border)',
+              borderRadius: 99,
+              background: 'var(--bg-deep)',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s, color 0.2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-2)' }}
+          >
+            👉 See example feedback
+          </button>
+        </div>
       )}
 
       {askMode && (
@@ -559,6 +581,7 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const [demoOpen, setDemoOpen] = useState(false)
   const { getToken, isLoaded, isSignedIn } = useSafeAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -1008,6 +1031,7 @@ export default function App() {
                 onSend={handleChatSend}
                 chatMessages={chatMessages}
                 isFirstVisit={true}
+                onShowDemo={() => setDemoOpen(true)}
               />
             ) : (
               /* ── RETURNING: Full layout with collapsible panel ── */
@@ -1143,6 +1167,11 @@ export default function App() {
               </>
             )}
           </div>
+
+          <DemoFeedbackModal
+            isOpen={demoOpen}
+            onClose={() => setDemoOpen(false)}
+          />
 
           <PaywallModal
             isOpen={phase === 'paywall'}

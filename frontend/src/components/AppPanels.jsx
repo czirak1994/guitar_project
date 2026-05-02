@@ -1033,3 +1033,242 @@ export function MicrophoneSetupModal({ isOpen, onClose, selectedDeviceId, onDevi
     </div>
   )
 }
+
+// ── DemoFeedbackModal ─────────────────────────────────────────────────────────
+const DEMO_AI_DATA = {
+  diagnosis:
+    "Your A minor pentatonic phrases have a solid foundation, but there's a consistent tendency to rush the 16th-note triplets — especially when shifting between the 5th and 7th frets on the G string. The picking attack is uneven: downstrokes land ~28 ms early on average, which breaks the groove against the click.",
+  specific_issues: [
+    "Timing rushes by ~25–30 ms on fast triplet bursts (bars 3, 7, 11)",
+    "Left-hand muting gaps — open string bleed audible on 3 transitions",
+    "Pitch accuracy drops to 71% on string bends — undershooting the target note by ~18 cents",
+  ],
+  actionable_fixes: [
+    "Practice the triplet figure at 60 BPM with the metronome on beats 2 & 4 only — force yourself to wait for the click",
+    "Use a consistent pick angle (≈ 15° toward the bridge) to even out attack dynamics",
+    "Pre-bend before striking the note on bends: hit the target pitch, then release — it trains your ear faster",
+  ],
+  focused_exercise:
+    "Take bars 3–4 in isolation. Loop them at 55 BPM until the rushing disappears, then push up 5 BPM every 2 clean passes. Target: 90 BPM without rushing.",
+  follow_up_question:
+    "Are you practicing with a metronome currently, or free-timing it? That changes my next recommendation.",
+}
+
+function DemoWaveform() {
+  const bars = 40
+  const heights = Array.from({ length: bars }, (_, i) => {
+    // Simulate a guitar-like amplitude envelope
+    const t = i / bars
+    const env = Math.sin(t * Math.PI) * 0.85 + 0.15
+    const noise = 0.4 + 0.6 * Math.abs(Math.sin(i * 2.7 + 1.3))
+    return Math.max(4, Math.round(env * noise * 38))
+  })
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 3,
+      height: 44,
+      padding: '0 4px',
+    }}>
+      {heights.map((h, i) => (
+        <div key={i} style={{
+          width: 3,
+          height: h,
+          borderRadius: 2,
+          background: `hsl(${36 + i * 1.4}, 85%, ${45 + (h / 38) * 25}%)`,
+          opacity: 0.85,
+          transition: 'height 0.3s ease',
+        }} />
+      ))}
+    </div>
+  )
+}
+
+export function DemoFeedbackModal({ isOpen, onClose }) {
+  const [playing, setPlaying] = useState(false)
+  const timerRef = useRef(null)
+  const [progress, setProgress] = useState(0)
+  const DURATION = 12 // seconds (fake demo)
+
+  useEffect(() => {
+    if (!isOpen) { setPlaying(false); setProgress(0) }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (playing) {
+      const start = Date.now() - progress * DURATION * 10
+      timerRef.current = setInterval(() => {
+        const pct = Math.min(1, (Date.now() - start) / (DURATION * 1000))
+        setProgress(pct)
+        if (pct >= 1) { setPlaying(false); clearInterval(timerRef.current) }
+      }, 50)
+    } else {
+      clearInterval(timerRef.current)
+    }
+    return () => clearInterval(timerRef.current)
+  }, [playing])
+
+  if (!isOpen) return null
+
+  const elapsed = (progress * DURATION).toFixed(1)
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 560, textAlign: 'left', padding: '28px 28px 24px' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Example Feedback</h2>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              This is what ToneSense AI generates from a real recording
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, padding: '0 4px' }}
+            aria-label="Close"
+          >×</button>
+        </div>
+
+        {/* Fake recording player */}
+        <div style={{
+          background: 'var(--bg-deep)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: '12px 16px',
+          marginBottom: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+              Sample Recording
+            </span>
+            <span style={{
+              fontSize: '0.7rem',
+              padding: '2px 8px',
+              borderRadius: 99,
+              background: 'rgba(255,178,50,0.12)',
+              border: '1px solid rgba(255,178,50,0.25)',
+              color: 'var(--yellow)',
+            }}>A minor pentatonic · 80 BPM</span>
+          </div>
+
+          <DemoWaveform />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+            <button
+              onClick={() => { setPlaying(p => !p); if (progress >= 1) setProgress(0) }}
+              style={{
+                width: 34, height: 34, borderRadius: '50%',
+                background: 'var(--accent)', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.9rem', color: '#1a0f00', flexShrink: 0,
+              }}
+            >
+              {playing ? '⏸' : '▶'}
+            </button>
+
+            {/* Progress bar */}
+            <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${progress * 100}%`,
+                background: 'var(--accent)',
+                borderRadius: 2,
+                transition: 'width 0.05s linear',
+              }} />
+            </div>
+
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-3)', fontFamily: 'monospace', flexShrink: 0 }}>
+              {elapsed}s / {DURATION}.0s
+            </span>
+          </div>
+        </div>
+
+        {/* AI output */}
+        <div style={{
+          background: 'var(--bg-deep)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: '16px 18px',
+          fontSize: '0.86rem',
+          lineHeight: 1.68,
+          color: 'var(--text-1)',
+          maxHeight: 360,
+          overflowY: 'auto',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              background: 'linear-gradient(135deg, var(--accent), var(--yellow))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.8rem', color: '#1a0f00', fontWeight: 700, flexShrink: 0,
+            }}>AI</div>
+            <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>ToneSense AI</span>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>guitar coach</span>
+          </div>
+
+          {/* Diagnosis */}
+          <p style={{ margin: '0 0 14px' }}>{DEMO_AI_DATA.diagnosis}</p>
+
+          {/* Issues */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>
+              Issues detected
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {DEMO_AI_DATA.specific_issues.map((iss, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>{iss}</li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Fixes */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>
+              Actionable fixes
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {DEMO_AI_DATA.actionable_fixes.map((fix, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>{fix}</li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Exercise */}
+          <div style={{
+            padding: '10px 14px',
+            background: 'rgba(255,178,50,0.07)',
+            border: '1px solid rgba(255,178,50,0.2)',
+            borderRadius: 8,
+            marginBottom: 12,
+          }}>
+            <div style={{ fontWeight: 600, color: 'var(--yellow)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+              Focused exercise
+            </div>
+            <div>{DEMO_AI_DATA.focused_exercise}</div>
+          </div>
+
+          {/* Follow-up */}
+          <div style={{ fontStyle: 'italic', color: 'var(--text-2)', fontSize: '0.84rem' }}>
+            {DEMO_AI_DATA.follow_up_question}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <button
+          className="btn-primary"
+          style={{ width: '100%', marginTop: 18, padding: '12px', fontSize: '0.96rem' }}
+          onClick={onClose}
+        >
+          Try it with your own playing →
+        </button>
+      </div>
+    </div>
+  )
+}
