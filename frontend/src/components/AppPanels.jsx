@@ -557,7 +557,7 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
       {/* Chat header */}
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-1)' }}>ToneSense AI</span>
@@ -572,6 +572,7 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
         flexDirection: 'column',
         gap: 10,
         padding: '16px 20px',
+        minHeight: 0,
       }}>
         {messages.length === 0 && (
           <div style={{
