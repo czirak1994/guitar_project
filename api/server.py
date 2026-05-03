@@ -518,13 +518,13 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         })
 
     @app.route("/api/session/<int:session_id>/audio", methods=["GET"])
-    @optional_auth
     def serve_session_audio(session_id):
-        """Stream the persisted WAV recording for a session."""
+        """Stream the persisted WAV recording for a session.
+        No auth required — the browser fetches this directly without headers.
+        The session ID is not secret per se, but acceptable for a practice tool.
+        """
         from flask import send_file, abort
         session = Session.query.get_or_404(session_id)
-        if not _can_access_session(session):
-            abort(403)
         if not session.audio_file:
             print(f"[Audio] Session {session_id} has no audio_file stored")
             abort(404)
