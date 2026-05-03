@@ -56,6 +56,51 @@ function timingSeverity(offsetMs) {
   return 'off'
 }
 
+/**
+ * Merge duplicate / ghost onsets that are closer than MIN_GAP_MS together.
+ * Notes MUST be pre-sorted by time_s (backend already does this).
+ * When two notes are within the gap window, keep the one with higher confidence.
+ */
+function mergeNotes(notes, minGapMs = 100) {
+  if (!notes.length) return notes
+  const sorted = [...notes].sort((a, b) => a.time_s - b.time_s)
+  const out = [{ ...sorted[0] }]
+  for (let i = 1; i < sorted.length; i++) {
+    const last  = out[out.length - 1]
+    const gapMs = (sorted[i].time_s - last.time_s) * 1000
+    if (gapMs <= minGapMs) {
+      // Keep whichever has higher confidence; fall back to later note if equal
+      if (sorted[i].confidence > last.confidence) {
+        out[out.length - 1] = { ...sorted[i] }
+      }
+    } else {
+      out.push({ ...sorted[i] })
+    }
+  }
+  return out
+}
+
+/**
+ * From a merged note list, return only the notes worth displaying:
+ *   – timing error > 20 ms (close or off)  ← player is noticeably off-beat
+ *   – pitch unknown (freq_hz === 0)         ← something played, can't tell what
+ * Cap at MAX_MARKERS sorted worst-first, then re-sort by time for rendering.
+ */
+const MAX_MARKERS = 12
+function computeVisibleNotes(notes, beatSec, phaseS) {
+  const sevOf = (n) => {
+    if (n.freq_hz === 0) return 'unknown'
+    const oMs = n.beat_offset_ms ?? beatOffsetMs(n.time_s, beatSec, phaseS)
+    return timingSeverity(oMs)
+  }
+  const sevOrder = { off: 2, close: 1, unknown: 0, good: -1 }
+  const problematic = notes.filter(n => sevOf(n) !== 'good')
+  return problematic
+    .sort((a, b) => (sevOrder[sevOf(b)] ?? 0) - (sevOrder[sevOf(a)] ?? 0))
+    .slice(0, MAX_MARKERS)
+    .sort((a, b) => a.time_s - b.time_s)
+}
+
 const H = 110   // logical canvas height (CSS pixels)
 
 const C = {
@@ -274,9 +319,11 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
   // Beat grid phase — auto-aligned to the notes, stable across renders
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const beatSec = bpm > 0 ? 60 / bpm : 0.5
-  // useMemo not available at module scope; compute deterministically from props
-  // so buildOffscreen and errNotes share the same phase value.
   const phaseS  = detectedNotes.length ? findBeatPhase(detectedNotes, beatSec) : 0
+
+  // Merge closely-spaced ghost onsets, then filter to only problem notes (≤20ms off)
+  const mergedNotes  = mergeNotes(detectedNotes)
+  const visibleNotes = computeVisibleNotes(mergedNotes, beatSec, phaseS)
 
   // ── Decode audio ──────────────────────────────────────────────────────────
   // KEY: we decode with a temporary AC that is IMMEDIATELY closed after decode.
@@ -328,11 +375,11 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     offscreenRef.current = buildOffscreen(
       physW, physH, totalSec,
       loaded ? bufferRef.current : null,
-      bpm, detectedNotes, dpr, phaseS
+      bpm, visibleNotes, dpr, phaseS
     )
     drawComposite(seekRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, totalSec, bpm, detectedNotes, physW, physH, phaseS])
+  }, [loaded, totalSec, bpm, visibleNotes, physW, physH, phaseS])
 
   // ── Composite: blit static offscreen + playhead + highlight ring ──────────
   const drawComposite = useCallback((posSec) => {
@@ -474,18 +521,18 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     setIsPlaying(false)
   }, [currentSec])
 
-  // ── Hover — pointer cursor near markers ──────────────────────────────────
+  // ── Hover — pointer cursor near visible markers ────────────────────────
   const handleCanvasMouseMove = useCallback((e) => {
-    if (!detectedNotes.length) return
+    if (!visibleNotes.length) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect      = canvas.getBoundingClientRect()
     const ratio     = (e.clientX - rect.left) / rect.width
     const hoverSec  = ratio * totalSecRef.current
     const hitRadius = 20 / (rect.width / totalSecRef.current)  // 20 CSS px in seconds
-    const near      = detectedNotes.some(n => Math.abs(n.time_s - hoverSec) < hitRadius)
+    const near      = visibleNotes.some(n => Math.abs(n.time_s - hoverSec) < hitRadius)
     canvas.style.cursor = near ? 'pointer' : (loaded ? 'crosshair' : 'default')
-  }, [detectedNotes, loaded])
+  }, [visibleNotes, loaded])
 
   // ── Click: seek or play 2-second marker snippet + highlight the note ────────
   const handleCanvasClick = useCallback((e) => {
@@ -497,7 +544,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     const hitRadius = 20 / (rect.width / totalSecRef.current)
 
     let nearest = null, minDist = Infinity
-    for (const note of detectedNotes) {
+    for (const note of visibleNotes) {
       const dist = Math.abs(note.time_s - clickSec)
       if (dist < hitRadius && dist < minDist) { minDist = dist; nearest = note }
     }
@@ -524,7 +571,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       if (isPlaying) play(clickSec)
       else drawComposite(clickSec)
     }
-  }, [isPlaying, play, drawComposite, detectedNotes])
+  }, [isPlaying, play, drawComposite, visibleNotes])
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
   useEffect(() => () => {
@@ -538,9 +585,9 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
 
   const fmt      = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
   const canPlay  = loaded && !noAudio
-  const hasNotes = detectedNotes.length > 0
-  // errNotes = notes that are badly timed (>= 60 ms off the beat)
-  const errNotes = detectedNotes.filter(n => {
+  const hasNotes = visibleNotes.length > 0
+  // errNotes = notes shown that are badly timed (>= 60 ms off the beat)
+  const errNotes = visibleNotes.filter(n => {
     if (n.freq_hz === 0) return false
     const oMs = n.beat_offset_ms ?? beatOffsetMs(n.time_s, beatSec, phaseS)
     return timingSeverity(oMs) === 'off'
@@ -586,7 +633,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       </div>
 
       {/* Controls */}
-      <div className="ptl-controls">
+      <div className="ptl-controls" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
         {canPlay && (
           <>
             <button
@@ -613,7 +660,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       {/* Metadata */}
       <div className="ptl-bpm-label">
         {bpm} BPM
-        {hasNotes && ` · ${detectedNotes.length} notes`}
+        {hasNotes && ` · ${visibleNotes.length} of ${mergedNotes.length} notes`}
         {!canPlay && !noAudio && !decoding && !loaded && ' · loading…'}
       </div>
     </div>
