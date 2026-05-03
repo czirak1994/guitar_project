@@ -12,29 +12,60 @@
  */
 import { useRef, useEffect, useState, useCallback } from 'react'
 
-// Visual severity: off-tune notes are visually dominant, good notes are subtle.
-// 'unknown' = onset detected but pitch could not be determined (freq_hz === 0).
-function noteSeverity(cents) {
-  if (cents === null || cents === undefined) return 'unknown'
-  const a = Math.abs(cents)
-  if (a < 18) return 'good'
-  if (a < 38) return 'close'
+// ── Beat-timing helpers ───────────────────────────────────────────────────────
+
+/**
+ * Auto-detect grid phase by minimising total |note − nearest_beat|.
+ * Returns phase in seconds (offset of beat 0 from t=0).
+ */
+function findBeatPhase(notes, beatSec) {
+  if (!notes.length || beatSec <= 0) return 0
+  const times = notes.map(n => n.time_s)
+  let bestPhase = 0, bestErr = Infinity
+  for (let i = 0; i < 200; i++) {
+    const candidate = (i / 200) * beatSec
+    let err = 0
+    for (const t of times) {
+      const pos = ((t - candidate) % beatSec + beatSec) % beatSec
+      err += Math.min(pos, beatSec - pos)
+    }
+    if (err < bestErr) { bestErr = err; bestPhase = candidate }
+  }
+  return bestPhase
+}
+
+/**
+ * Signed beat offset in ms (negative = early, positive = late).
+ * Uses backend-supplied beat_offset_ms when available (includes latency correction).
+ */
+function beatOffsetMs(timeS, beatSec, phaseS) {
+  if (beatSec <= 0) return 0
+  const pos = ((timeS - phaseS) % beatSec + beatSec) % beatSec
+  const signed = pos > beatSec / 2 ? pos - beatSec : pos
+  return signed * 1000
+}
+
+/**
+ * Timing severity bucket.
+ * 'unknown' = onset with no pitch detection (freq_hz === 0).
+ */
+function timingSeverity(offsetMs) {
+  const a = Math.abs(offsetMs)
+  if (a < 20) return 'good'
+  if (a < 60) return 'close'
   return 'off'
 }
 
 const H = 110   // logical canvas height (CSS pixels)
 
 const C = {
-  bg:        '#0b0907',
-  good:      '#22c55e',
-  close:     '#eab308',
-  off:       '#ef4444',
-  unknown:   '#6b7280',  // gray — onset detected, pitch unknown
-  playhead:  '#F5A623',
-}
-
-function noteColor(cents) {
-  return C[noteSeverity(cents)]
+  bg:       '#0b0907',
+  good:     '#22c55e',   // on-time   < 20 ms
+  close:    '#eab308',   // close     20-60 ms
+  off:      '#ef4444',   // late/early >= 60 ms
+  unknown:  '#6b7280',   // onset detected, pitch unknown
+  beat:     '#F5A623',   // beat grid + playhead
+  playhead: '#F5A623',
 }
 
 // ── RMS envelope ──────────────────────────────────────────────────────────────
@@ -57,11 +88,20 @@ function buildRMS(channelData, W) {
 }
 
 /**
- * Build static layer.
- * physW/physH = physical (device) pixels.
- * dpr = devicePixelRatio — context is scaled so all drawing is in logical (CSS) coords.
+ * Build static layer: background → waveform → beat grid → note markers.
+ *
+ * Note markers are now coloured by TIMING offset from the nearest beat
+ * (not pitch accuracy). Each note stays at its real time_s — never snapped.
+ *
+ * Beat grid shows:
+ *   – small downward triangle at the top of every beat  ← "you should play here"
+ *   – tick at the bottom of every beat
+ *   – faint full-height bar line on every 4th beat (measure)
+ *
+ * phaseS (seconds): grid phase pre-computed in the component so it is
+ * consistent between buildOffscreen and the component-level errNotes count.
  */
-function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes, dpr) {
+function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes, dpr, phaseS) {
   const off = document.createElement('canvas')
   off.width  = physW
   off.height = physH
@@ -69,78 +109,113 @@ function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes,
 
   // Scale once — draw everything in logical (CSS-pixel) coords
   oc.scale(dpr, dpr)
-  const lW    = physW / dpr   // logical width
-  const lH    = physH / dpr   // logical height
-  const midY  = lH / 2
+  const lW       = physW / dpr
+  const lH       = physH / dpr
+  const midY     = lH / 2
   const pxPerSec = lW / totalSec
 
   // Background
   oc.fillStyle = C.bg
   oc.fillRect(0, 0, lW, lH)
 
-  // ── Waveform — intentionally dim so error markers pop ─────────────────────
+  // ── Waveform — dim, so timing markers stay visually dominant ──────────────
   if (audioBuffer) {
     const rms  = buildRMS(audioBuffer.getChannelData(0), Math.round(lW))
     const grad = oc.createLinearGradient(0, 0, 0, lH)
-    grad.addColorStop(0,   'rgba(245,166,35,0.15)')
-    grad.addColorStop(0.5, 'rgba(245,166,35,0.30)')
-    grad.addColorStop(1,   'rgba(245,166,35,0.15)')
+    grad.addColorStop(0,   'rgba(245,166,35,0.10)')
+    grad.addColorStop(0.5, 'rgba(245,166,35,0.18)')
+    grad.addColorStop(1,   'rgba(245,166,35,0.10)')
     oc.fillStyle = grad
     oc.beginPath()
     oc.moveTo(0, midY)
-    for (let x = 0; x < Math.round(lW); x++) oc.lineTo(x, midY - rms[x] * midY * 0.65)
-    for (let x = Math.round(lW) - 1; x >= 0; x--) oc.lineTo(x, midY + rms[x] * midY * 0.65)
+    for (let x = 0; x < Math.round(lW); x++) oc.lineTo(x, midY - rms[x] * midY * 0.55)
+    for (let x = Math.round(lW) - 1; x >= 0; x--) oc.lineTo(x, midY + rms[x] * midY * 0.55)
     oc.closePath()
     oc.fill()
-    oc.strokeStyle = 'rgba(245,166,35,0.08)'
-    oc.lineWidth   = 0.5
-    oc.beginPath(); oc.moveTo(0, midY); oc.lineTo(lW, midY); oc.stroke()
   }
 
-  // ── Beat grid — measure lines only ────────────────────────────────────────
-  const beatSec  = 60 / bpm
-  const numBeats = Math.ceil(totalSec / beatSec) + 1
-  for (let i = 0; i <= numBeats; i++) {
-    if (i % 4 !== 0) continue
-    const x = i * beatSec * pxPerSec
-    if (x > lW) break
-    oc.strokeStyle = 'rgba(245,166,35,0.14)'
-    oc.lineWidth   = 1
-    oc.beginPath(); oc.moveTo(x, 0); oc.lineTo(x, lH); oc.stroke()
+  // ── Beat grid ─────────────────────────────────────────────────────────────
+  // Every beat: small triangle target marker at top + bottom tick.
+  // Every 4th beat: faint full-height bar line.
+  const beatSec  = bpm > 0 ? 60 / bpm : 0.5
+  const numBeats = Math.ceil(totalSec / beatSec) + 2
+
+  for (let i = -1; i <= numBeats; i++) {
+    const x = (phaseS + i * beatSec) * pxPerSec
+    if (x < -4 || x > lW + 4) continue
+    const isMeasure = (i % 4 === 0)
+
+    if (isMeasure) {
+      // Bar line — very faint, full height
+      oc.globalAlpha = 0.16
+      oc.strokeStyle = C.beat
+      oc.lineWidth   = 0.75
+      oc.beginPath(); oc.moveTo(x, 0); oc.lineTo(x, lH); oc.stroke()
+    }
+
+    // Bottom tick
+    oc.globalAlpha = isMeasure ? 0.35 : 0.22
+    oc.strokeStyle = C.beat
+    oc.lineWidth   = 0.75
+    oc.beginPath(); oc.moveTo(x, lH - 9); oc.lineTo(x, lH); oc.stroke()
+
+    // Downward triangle at top — "play here" target
+    oc.globalAlpha = isMeasure ? 0.50 : 0.28
+    oc.fillStyle   = C.beat
+    oc.beginPath()
+    oc.moveTo(x - 3.5, 0)
+    oc.lineTo(x + 3.5, 0)
+    oc.lineTo(x, 6.5)
+    oc.closePath()
+    oc.fill()
+
+    oc.globalAlpha = 1
   }
 
-  // ── Note markers — errors dominant, good notes subtle ─────────────────────
+  // ── Note markers — coloured by timing offset from nearest beat ────────────
+  // Back-supplied beat_offset_ms is used when available (has latency correction).
+  // Frontend fallback: compute from time_s, beatSec, phaseS.
+  const noteSev = (note) => {
+    if (note.freq_hz === 0) return 'unknown'
+    const oMs = note.beat_offset_ms ?? beatOffsetMs(note.time_s, beatSec, phaseS)
+    return timingSeverity(oMs)
+  }
+
+  // Draw in ascending severity order so errors render on top
   const sorted = [...detectedNotes].sort((a, b) => {
     const order = { good: 0, unknown: 1, close: 2, off: 3 }
-    return order[noteSeverity(a.cents)] - order[noteSeverity(b.cents)]
+    return order[noteSev(a)] - order[noteSev(b)]
   })
 
   sorted.forEach(note => {
     const x   = note.time_s * pxPerSec
-    const col = noteColor(note.cents)
-    const sev = noteSeverity(note.cents)
+    const sev = noteSev(note)
+    const col = C[sev]
 
     if (sev === 'off') {
-      oc.globalAlpha = 0.28; oc.fillStyle = col
-      oc.beginPath(); oc.arc(x, midY, 20, 0, Math.PI * 2); oc.fill()
-      oc.globalAlpha = 0.65; oc.strokeStyle = col; oc.lineWidth = 1.5
-      oc.beginPath(); oc.moveTo(x, 0); oc.lineTo(x, lH); oc.stroke()
-      oc.globalAlpha = 1; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 14
-      oc.beginPath(); oc.arc(x, 12, 7, 0, Math.PI * 2); oc.fill()
+      // Late/early — dominant glow + stem
+      oc.globalAlpha = 0.22; oc.fillStyle = col
+      oc.beginPath(); oc.arc(x, midY, 18, 0, Math.PI * 2); oc.fill()
+      oc.globalAlpha = 0.55; oc.strokeStyle = col; oc.lineWidth = 1.5
+      oc.beginPath(); oc.moveTo(x, 8); oc.lineTo(x, lH - 10); oc.stroke()
+      oc.globalAlpha = 1; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 12
+      oc.beginPath(); oc.arc(x, 12, 6, 0, Math.PI * 2); oc.fill()
       oc.shadowBlur = 0
     } else if (sev === 'close') {
-      oc.globalAlpha = 0.15; oc.fillStyle = col
-      oc.beginPath(); oc.arc(x, midY, 10, 0, Math.PI * 2); oc.fill()
-      oc.globalAlpha = 0.8; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 5
-      oc.beginPath(); oc.arc(x, 12, 4.5, 0, Math.PI * 2); oc.fill()
+      // Within 20-60 ms
+      oc.globalAlpha = 0.12; oc.fillStyle = col
+      oc.beginPath(); oc.arc(x, midY, 8, 0, Math.PI * 2); oc.fill()
+      oc.globalAlpha = 0.80; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 4
+      oc.beginPath(); oc.arc(x, 12, 4, 0, Math.PI * 2); oc.fill()
       oc.shadowBlur = 0
     } else if (sev === 'unknown') {
-      // Pitch-unknown onset: small gray dot, no glow
-      oc.globalAlpha = 0.55; oc.fillStyle = col
-      oc.beginPath(); oc.arc(x, 12, 4, 0, Math.PI * 2); oc.fill()
+      // No pitch — small gray dot, no glow
+      oc.globalAlpha = 0.50; oc.fillStyle = col
+      oc.beginPath(); oc.arc(x, 12, 3.5, 0, Math.PI * 2); oc.fill()
     } else {
-      oc.globalAlpha = 0.50; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 3
-      oc.beginPath(); oc.arc(x, 12, 3, 0, Math.PI * 2); oc.fill()
+      // On-time (< 20 ms)
+      oc.globalAlpha = 0.60; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 4
+      oc.beginPath(); oc.arc(x, 12, 4, 0, Math.PI * 2); oc.fill()
       oc.shadowBlur = 0
     }
     oc.globalAlpha = 1
@@ -151,9 +226,10 @@ function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes,
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = [], durationSec = 10 }) {
-  const containerRef   = useRef(null)   // wrapping div — observed for width
-  const canvasRef      = useRef(null)
-  const offscreenRef   = useRef(null)
+  const containerRef      = useRef(null)   // wrapping div — observed for width
+  const canvasRef         = useRef(null)
+  const offscreenRef      = useRef(null)
+  const highlightedNoteRef = useRef(null)  // note currently highlighted after a click
   // ── Playback: separate from decode so we always create AC from user gesture ──
   const playAcRef      = useRef(null)   // dedicated playback AudioContext
   const sourceRef      = useRef(null)
@@ -194,6 +270,13 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
 
   const physW = Math.round((cssW || 720) * dpr)
   const physH = Math.round(H * dpr)
+
+  // Beat grid phase — auto-aligned to the notes, stable across renders
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const beatSec = bpm > 0 ? 60 / bpm : 0.5
+  // useMemo not available at module scope; compute deterministically from props
+  // so buildOffscreen and errNotes share the same phase value.
+  const phaseS  = detectedNotes.length ? findBeatPhase(detectedNotes, beatSec) : 0
 
   // ── Decode audio ──────────────────────────────────────────────────────────
   // KEY: we decode with a temporary AC that is IMMEDIATELY closed after decode.
@@ -245,13 +328,13 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     offscreenRef.current = buildOffscreen(
       physW, physH, totalSec,
       loaded ? bufferRef.current : null,
-      bpm, detectedNotes, dpr
+      bpm, detectedNotes, dpr, phaseS
     )
     drawComposite(seekRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, totalSec, bpm, detectedNotes, physW, physH])
+  }, [loaded, totalSec, bpm, detectedNotes, physW, physH, phaseS])
 
-  // ── Composite: blit static offscreen + playhead ───────────────────────────
+  // ── Composite: blit static offscreen + playhead + highlight ring ──────────
   const drawComposite = useCallback((posSec) => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -266,13 +349,31 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       ctx.fillRect(0, 0, cW, cH)
     }
 
-    if (posSec <= 0) return
-
-    // Draw playhead in logical (CSS-pixel) coordinates
     const d  = window.devicePixelRatio || 1
     const lW = cW / d
     const lH = cH / d
-    const x  = Math.min((posSec / totalSecRef.current) * lW, lW - 1)
+
+    // ── Highlight ring around last-clicked note ───────────────────────────
+    const hn = highlightedNoteRef.current
+    if (hn) {
+      const hx = (hn.time_s / totalSecRef.current) * lW
+      ctx.save()
+      ctx.scale(d, d)
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+      ctx.lineWidth   = 1.5
+      ctx.shadowColor = '#ffffff'
+      ctx.shadowBlur  = 8
+      ctx.beginPath()
+      ctx.arc(hx, 12, 11, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.shadowBlur = 0
+      ctx.restore()
+    }
+
+    if (posSec <= 0) return
+
+    // Draw playhead in logical (CSS-pixel) coordinates
+    const x = Math.min((posSec / totalSecRef.current) * lW, lW - 1)
 
     ctx.save()
     ctx.scale(d, d)
@@ -386,7 +487,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     canvas.style.cursor = near ? 'pointer' : (loaded ? 'crosshair' : 'default')
   }, [detectedNotes, loaded])
 
-  // ── Click: seek or play 2-second marker snippet ──────────────────────────
+  // ── Click: seek or play 2-second marker snippet + highlight the note ────────
   const handleCanvasClick = useCallback((e) => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -403,9 +504,11 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
 
     if (nearest && bufferRef.current) {
       if (snippetTimerRef.current) clearTimeout(snippetTimerRef.current)
+      highlightedNoteRef.current = nearest
       play(Math.max(0, nearest.time_s - 0.3))
       snippetTimerRef.current = setTimeout(() => {
         snippetTimerRef.current = null
+        highlightedNoteRef.current = null
         cancelAnimationFrame(rafRef.current)
         if (sourceRef.current) { try { sourceRef.current.onended = null; sourceRef.current.stop() } catch {} }
         setIsPlaying(false)
@@ -415,6 +518,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       }, 2000)
     } else {
       if (snippetTimerRef.current) { clearTimeout(snippetTimerRef.current); snippetTimerRef.current = null }
+      highlightedNoteRef.current = null
       seekRef.current = clickSec
       setCurrentSec(clickSec)
       if (isPlaying) play(clickSec)
@@ -435,7 +539,12 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
   const fmt      = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
   const canPlay  = loaded && !noAudio
   const hasNotes = detectedNotes.length > 0
-  const errNotes = detectedNotes.filter(n => noteSeverity(n.cents) === 'off')
+  // errNotes = notes that are badly timed (>= 60 ms off the beat)
+  const errNotes = detectedNotes.filter(n => {
+    if (n.freq_hz === 0) return false
+    const oMs = n.beat_offset_ms ?? beatOffsetMs(n.time_s, beatSec, phaseS)
+    return timingSeverity(oMs) === 'off'
+  })
 
   return (
     <div className="ptl-wrap">
@@ -470,7 +579,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
             pointerEvents: 'none', userSelect: 'none',
           }}>
             {errNotes.length > 0
-              ? `${errNotes.length} mistake${errNotes.length > 1 ? 's' : ''} — click to hear`
+              ? `${errNotes.length} late/early — click to hear`
               : 'Click to seek'}
           </div>
         )}
@@ -494,9 +603,9 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
         )}
         {hasNotes && (
           <div className="ptl-legend">
-            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--g" />In tune</span>
-            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--y" />Close</span>
-            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--r" />Off</span>
+            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--g" />On time</span>
+            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--y" />±20-60ms</span>
+            <span className="ptl-legend-item"><span className="ptl-dot ptl-dot--r" />Early/Late</span>
           </div>
         )}
       </div>

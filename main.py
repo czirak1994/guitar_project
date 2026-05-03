@@ -145,6 +145,30 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
         onset_times, config.analysis.bpm, auto_align=True
     )
 
+    # Augment each detected note with its per-beat timing offset so the frontend
+    # can colour markers correctly without re-deriving the grid phase.
+    # timing_report.results[i] corresponds to detected_notes[i] (same order).
+    for note, tr in zip(detected_notes, timing_report.results):
+        note["beat_offset_ms"] = round(tr.deviation_ms, 1)
+        note["beat_time_s"]    = round(tr.expected_time_s + latency_s, 3)
+
+    # --- Metronome leak check ---
+    # If the microphone is picking up speaker output, onsets will cluster at
+    # exact beat intervals with near-zero jitter — impossible for a human player.
+    # Heuristic: std of |deviation| < 5 ms AND mean |deviation| < 8 ms
+    # across more than 4 notes → almost certainly a click-track leak.
+    metronome_leak_warning = None
+    if len(timing_report.results) > 4:
+        devs = [abs(r.deviation_ms) for r in timing_report.results]
+        if float(np.std(devs)) < 5.0 and float(np.mean(devs)) < 8.0:
+            metronome_leak_warning = (
+                "⚠ Metronome leak detected: onset jitter is suspiciously low "
+                f"(std={np.std(devs):.1f} ms, mean={np.mean(devs):.1f} ms). "
+                "The microphone may be capturing the click track from speakers. "
+                "Fix: use headphones, or route the metronome to a separate output."
+            )
+            print(f"  [WARNING] {metronome_leak_warning}")
+
     # --- Pitch accuracy (if expected notes provided) ---
     # For offline MVP, we compare detected notes against themselves
     # (self-consistency check). In practice, user provides expected sequence.
@@ -182,8 +206,11 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
     
     report_dict = report.to_dict()
     # Inject per-note data and duration for the frontend timeline
-    report_dict["detected_notes"] = detected_notes
-    report_dict["duration_s"] = round(len(signal) / sr, 3)
+    report_dict["detected_notes"]     = detected_notes
+    report_dict["duration_s"]         = round(len(signal) / sr, 3)
+    report_dict["phase_offset_ms"]    = timing_report.phase_offset_ms
+    if metronome_leak_warning:
+        report_dict["metronome_leak_warning"] = metronome_leak_warning
 
     from feedback.ai_coach import AICoach
     if run_ai:
