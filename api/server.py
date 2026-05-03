@@ -339,8 +339,18 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             new_session.problem = user_problem
             new_session.focus = focus
             new_session.style = style
-            # Store detected notes so they survive page refresh
-            detected_notes = report.get('detected_notes', [])
+            # Store detected notes so they survive page refresh.
+            # If the frontend sent its own DSP-detected notes, prefer those — they
+            # come from a higher-quality pitchy pipeline and are already debounced.
+            frontend_notes_raw = request.form.get('frontend_notes')
+            if frontend_notes_raw:
+                try:
+                    detected_notes = json.loads(frontend_notes_raw)
+                    print(f"[Notes] Using {len(detected_notes)} frontend-detected notes")
+                except Exception:
+                    detected_notes = report.get('detected_notes', [])
+            else:
+                detected_notes = report.get('detected_notes', [])
             new_session.detected_notes_json = json.dumps(detected_notes)
             db.session.add(new_session)
             db.session.flush() # get ID

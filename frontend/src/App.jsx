@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
+import { detectNotes } from './utils/detectNotes'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -800,11 +801,17 @@ export default function App() {
                 allSamples.set(a, offset)
                 offset += a.length
             }
-            
+
+            // ── Frontend DSP note detection ────────────────────────────────
+            // Run before encoding so we have the raw Float32 samples at hand.
+            // Results are attached to pendingAudio and later sent to the backend.
+            const { notes: frontendNotes, duration: frontendDuration } =
+              detectNotes(allSamples, audioCtx.sampleRate)
+
             const wavBlob = encodeWAV(allSamples, audioCtx.sampleRate)
             const wavUrl = URL.createObjectURL(wavBlob)
-            
-            setPendingAudio({ blob: wavBlob, url: wavUrl })
+
+            setPendingAudio({ blob: wavBlob, url: wavUrl, detectedNotes: frontendNotes, duration: frontendDuration })
             setPhase('review')
             inFlightRef.current = false
             audioCtx.close().catch(()=>{})
@@ -839,7 +846,7 @@ export default function App() {
               text: null,
               // Use server URL (persists across refreshes); fall back to in-memory blob
               audio_url: serverAudioUrl || m.audio_url,
-              detected_notes: data.detected_notes?.length ? data.detected_notes : (noteData.detected_notes || []),
+              detected_notes: noteData.detected_notes?.length ? noteData.detected_notes : (data.detected_notes || []),
               duration_s: data.duration_s || noteData.duration_s || 0,
               note_bpm: data.bpm || noteData.bpm || 120,
             } : m))
@@ -902,6 +909,15 @@ export default function App() {
         formData.append('scale_or_key', scaleKey)
         formData.append('rhythm_info', rhythmInfo)
 
+        // ── Include frontend-detected notes so the backend stores them ────────
+        // The backend will use these instead of running its own detection,
+        // and return them via /api/session/<id> for timeline persistence.
+        const frontendNotes    = audio?.detectedNotes || []
+        const frontendDuration = audio?.duration       || 0
+        if (frontendNotes.length) {
+          formData.append('frontend_notes', JSON.stringify(frontendNotes))
+        }
+
         const { data } = await axios.post('/api/analyze', formData, {
           headers: authHeaders(jwt),
         })
@@ -920,10 +936,12 @@ export default function App() {
           bpm,
         })
 
-        // Stash per-note data for the timeline (keyed by aiMsgId)
+        // Stash per-note data for the timeline (keyed by aiMsgId).
+        // Frontend-detected notes take priority — they're already available
+        // without waiting for the AI poll to finish.
         const noteData = {
-          detected_notes: data.detected_notes || [],
-          duration_s: data.duration_s || 0,
+          detected_notes: frontendNotes.length ? frontendNotes : (data.detected_notes || []),
+          duration_s: data.duration_s || frontendDuration || 0,
           bpm: data.bpm || bpm,
         }
 
