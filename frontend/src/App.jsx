@@ -1162,6 +1162,7 @@ export default function App() {
                     onSend={handleChatSend}
                     panelEverOpened={panelEverOpened}
                     onExpandPanel={() => { setLeftPanelOpen(true); setPanelEverOpened(true) }}
+                    latestMetrics={latestMetrics}
                   />
                 </div>
               </>

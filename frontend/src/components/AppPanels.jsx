@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom'
 import axios from 'axios'
 import YouTube from 'react-youtube'
 import PerformanceChart from '../PerformanceChart'
+import FeedbackGrid from './FeedbackGrid'
 
 export function SectionTooltip({ text }) {
   const [visible, setVisible] = useState(false)
@@ -441,7 +442,7 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
 }
 
 // ── AIChatBubble ─────────────────────────────────────────────────────────────
-export function AIChatBubble({ message }) {
+export function AIChatBubble({ message, dspMetrics }) {
   if (message.status === 'analyzing') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -523,6 +524,17 @@ export function AIChatBubble({ message }) {
                 {d.follow_up_question}
               </div>
             )}
+            {/* Beat Grid — shown when DSP metrics are available */}
+            {dspMetrics && (
+              <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+                <FeedbackGrid
+                  onTimeRatio={dspMetrics.on_time_ratio}
+                  accuracyPct={dspMetrics.accuracy_pct}
+                  timingErrorMs={dspMetrics.timing_error_ms}
+                  beatCount={8}
+                />
+              </div>
+            )}
           </>
         ) : (
           <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
@@ -533,7 +545,7 @@ export function AIChatBubble({ message }) {
 }
 
 // ── ConversationalChat ────────────────────────────────────────────────────────
-export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, panelEverOpened, onExpandPanel }) {
+export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, panelEverOpened, onExpandPanel, latestMetrics }) {
   const [text, setText] = useState('')
   const bottomRef = useRef(null)
 
@@ -614,7 +626,11 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
               )}
             </div>
           ) : (
-            <AIChatBubble key={m.id || i} message={m} />
+            <AIChatBubble
+              key={m.id || i}
+              message={m}
+              dspMetrics={m.status === 'done' && m.ai_data ? latestMetrics : null}
+            />
           )
         ))}
 
