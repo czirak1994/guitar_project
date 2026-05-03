@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
@@ -647,6 +647,43 @@ export default function App() {
     }
   }, [backingVolume])
 
+  // Restore recent sessions from DB so chat history survives a page refresh
+  const restoreSessionsFromDB = useCallback(async (jwt) => {
+    try {
+      const { data: sessions } = await axios.get('/api/sessions/recent', {
+        headers: authHeaders(jwt),
+      })
+      if (!sessions?.length) return
+      const restored = []
+      for (const s of sessions) {
+        const userMsgId = `restored-u-${s.session_id}`
+        const aiMsgId   = `restored-a-${s.session_id}`
+        if (s.problem) {
+          restored.push({ id: userMsgId, role: 'user', text: s.problem, audio_url: s.audio_url })
+        }
+        restored.push({
+          id: aiMsgId,
+          role: 'assistant',
+          status: 'done',
+          ai_data: s.ai_advice,
+          text: null,
+          audio_url: s.audio_url,
+          detected_notes: s.detected_notes || [],
+          duration_s: s.duration_s || 0,
+          note_bpm: s.bpm || 120,
+        })
+      }
+      // Only restore if we have no existing messages (don't overwrite current session)
+      setChatMessages(prev => prev.length === 0 ? restored.reverse() : prev)
+      if (sessions.length > 0) {
+        setActiveChatSessionId(sessions[0].session_id)
+      }
+      console.debug('[restore] Restored', sessions.length, 'sessions from DB')
+    } catch (e) {
+      console.warn('[restore] Could not restore sessions:', e.message)
+    }
+  }, [])
+
   useEffect(() => {
     if (!isLoaded) return
     if (isSignedIn) {
@@ -663,14 +700,16 @@ export default function App() {
           const res = await axios.get('/api/usage', { headers: authHeaders(jwt) })
           setUsage(res.data)
         } catch { /* ignore */ }
+        await restoreSessionsFromDB(jwt)
       })
     } else {
       // Guest — no profile, but fetch usage so header shows remaining count
       axios.get('/api/usage')
         .then(res => setUsage(res.data))
         .catch(() => {})
+      restoreSessionsFromDB(null)
     }
-  }, [isLoaded, isSignedIn, getToken])
+  }, [isLoaded, isSignedIn, getToken, restoreSessionsFromDB])
 
   const handleOnboardingSubmit = async ({ skill, goal, language }) => {
      try {
@@ -791,14 +830,18 @@ export default function App() {
           inFlightRef.current = false
           setActiveChatSessionId(sessionId)
           if (data.ai_status === 'completed') {
+            const serverAudioUrl = data.audio_url || null
+            console.debug('[pollChatAI] audio_url from server:', serverAudioUrl)
             setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
               ...m,
               status: 'done',
               ai_data: data.ai_advice,
               text: null,
-              detected_notes: noteData.detected_notes || [],
-              duration_s: noteData.duration_s || 0,
-              note_bpm: noteData.bpm || 120,
+              // Use server URL (persists across refreshes); fall back to in-memory blob
+              audio_url: serverAudioUrl || m.audio_url,
+              detected_notes: data.detected_notes?.length ? data.detected_notes : (noteData.detected_notes || []),
+              duration_s: data.duration_s || noteData.duration_s || 0,
+              note_bpm: data.bpm || noteData.bpm || 120,
             } : m))
             // Progressive disclosure: unlock full layout after first successful AI result
             if (!hasEverRecorded) {

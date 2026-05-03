@@ -9,10 +9,19 @@ Endpoints:
 
 import time
 import os
+import shutil
 from pathlib import Path
 import datetime
 import threading
 import json
+
+# Persistent directory for uploaded audio files.
+# Override with UPLOADS_DIR env var in production (e.g., point to a mounted volume).
+UPLOADS_DIR = Path(os.environ.get(
+    'UPLOADS_DIR',
+    str(Path(__file__).parent.parent / 'uploads')
+))
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -105,6 +114,12 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 conn.execute(db.text(
                     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS guest_token VARCHAR"
                 ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS audio_file VARCHAR"
+                ))
+                conn.execute(db.text(
+                    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS detected_notes_json TEXT"
+                ))
                 # Make user_id nullable on existing tables
                 try:
                     conn.execute(db.text(
@@ -113,7 +128,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 except Exception:
                     pass
                 conn.commit()
-                print("[DB] Migration: stripe_customer_id, problem, focus, style, guest_token columns ensured.")
+                print("[DB] Migration: stripe_customer_id, problem, focus, style, guest_token, audio_file, detected_notes_json columns ensured.")
         except Exception as migration_err:
             # SQLite doesn't support IF NOT EXISTS on ALTER TABLE
             # but it's fine — it will fail silently on SQLite dev env
@@ -324,8 +339,22 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             new_session.problem = user_problem
             new_session.focus = focus
             new_session.style = style
+            # Store detected notes so they survive page refresh
+            detected_notes = report.get('detected_notes', [])
+            new_session.detected_notes_json = json.dumps(detected_notes)
             db.session.add(new_session)
             db.session.flush() # get ID
+
+            # ── Persist audio to disk ──────────────────────────────────────────
+            # Copy the temp upload to a permanent location keyed by session ID.
+            # The temp file is still used by the async AI thread; it removes it when done.
+            persistent_audio = UPLOADS_DIR / f"session_{new_session.id}.wav"
+            try:
+                shutil.copy2(str(tmp), str(persistent_audio))
+                new_session.audio_file = str(persistent_audio)
+                print(f"[Audio] Saved to {persistent_audio} ({persistent_audio.stat().st_size} bytes)")
+            except Exception as copy_err:
+                print(f"[Audio] Could not copy to uploads dir: {copy_err}")
 
             if is_silent:
                 print(f"[Async AI] Silence detected ({report.get('amplitude_db')}dB). Skipping AI.")
@@ -422,7 +451,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 "amplitude_db": report.get("amplitude_db"),
                 "bpm": config.analysis.bpm,
                 "duration_s": report.get("duration_s", 0),
-                "detected_notes": report.get("detected_notes", []),
+                "detected_notes": detected_notes,
+                "audio_url": f"/api/session/{new_session.id}/audio" if new_session.audio_file else None,
                 "streak_days": learning_state.streak_days if learning_state else None,
                 "current_focus": learning_state.current_focus if learning_state else None,
                 "is_guest": g.is_guest,
@@ -467,14 +497,101 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             except Exception:
                 pass
 
+        # Restore detected notes from JSON column
+        detected_notes = []
+        if session.detected_notes_json:
+            try:
+                detected_notes = json.loads(session.detected_notes_json)
+            except Exception:
+                pass
+
         return jsonify({
             "id": session.id,
             "ai_status": session.ai_status,
             "accuracy_pct": metrics.pitch_accuracy if metrics else 0,
             "bpm": session.bpm,
+            "duration_s": session.duration or 0,
+            "detected_notes": detected_notes,
+            "audio_url": f"/api/session/{session.id}/audio" if session.audio_file else None,
             "ai_advice": advice,
             "ai_meta": ai_meta,
         })
+
+    @app.route("/api/session/<int:session_id>/audio", methods=["GET"])
+    @optional_auth
+    def serve_session_audio(session_id):
+        """Stream the persisted WAV recording for a session."""
+        from flask import send_file, abort
+        session = Session.query.get_or_404(session_id)
+        if not _can_access_session(session):
+            abort(403)
+        if not session.audio_file:
+            print(f"[Audio] Session {session_id} has no audio_file stored")
+            abort(404)
+        audio_path = Path(session.audio_file)
+        if not audio_path.exists():
+            print(f"[Audio] File missing on disk: {audio_path}")
+            abort(404)
+        return send_file(
+            str(audio_path),
+            mimetype='audio/wav',
+            as_attachment=False,
+            download_name=f'session_{session_id}.wav',
+        )
+
+    @app.route("/api/sessions/recent", methods=["GET"])
+    @optional_auth
+    def get_recent_sessions():
+        """Return last 10 completed sessions for the current user/guest so the
+        frontend can restore the chat history after a page refresh."""
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        if g.is_guest:
+            sessions = (
+                Session.query
+                .filter_by(guest_token=g.guest_id, ai_status='completed')
+                .order_by(Session.timestamp.desc())
+                .limit(limit).all()
+            )
+        else:
+            sessions = (
+                Session.query
+                .filter_by(user_id=g.user_id, ai_status='completed')
+                .order_by(Session.timestamp.desc())
+                .limit(limit).all()
+            )
+
+        out = []
+        for s in sessions:
+            metrics = s.performance_metric
+            ai_fb = s.ai_feedback
+            advice = None
+            if ai_fb and ai_fb.detailed_feedback:
+                try:
+                    stored = json.loads(ai_fb.detailed_feedback)
+                    advice = stored.get('advice') if isinstance(stored, dict) else stored
+                except Exception:
+                    pass
+            detected_notes = []
+            if s.detected_notes_json:
+                try:
+                    detected_notes = json.loads(s.detected_notes_json)
+                except Exception:
+                    pass
+            out.append({
+                'session_id': s.id,
+                'timestamp': s.timestamp.isoformat(),
+                'bpm': s.bpm,
+                'duration_s': s.duration or 0,
+                'accuracy_pct': metrics.pitch_accuracy if metrics else None,
+                'detected_notes': detected_notes,
+                'audio_url': f'/api/session/{s.id}/audio' if s.audio_file else None,
+                'ai_advice': advice,
+                'problem': s.problem,
+            })
+
+        resp = jsonify(out)
+        return _attach_guest_cookie(resp)
 
     @app.route("/api/session/<int:session_id>/chat", methods=["GET"])
     @optional_auth

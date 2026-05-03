@@ -77,6 +77,8 @@ class Session(db.Model):
     problem = db.Column(db.String, nullable=True)  # User's stated problem
     focus = db.Column(db.String, nullable=True)    # Selected focus area: Timing, Rhythm, Technique, Tone
     style = db.Column(db.String, nullable=True)    # Guitar style: Metal, Blues, Jazz, etc.
+    audio_file = db.Column(db.String, nullable=True)          # Server-side saved WAV path
+    detected_notes_json = db.Column(db.Text, nullable=True)   # JSON array of detected notes
     
     performance_metric = db.relationship('PerformanceMetric', backref='session', uselist=False, lazy=True)
     ai_feedback = db.relationship('AIFeedback', backref='session', uselist=False, lazy=True)

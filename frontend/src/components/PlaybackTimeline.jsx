@@ -200,13 +200,15 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     setDecodeError(false)
     let cancelled = false
 
+    console.debug('[PlaybackTimeline] Fetching audio:', audioUrl)
     ;(async () => {
       let tmpAc = null
       try {
         const res = await fetch(audioUrl)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status} — ${audioUrl}`)
         const raw = await res.arrayBuffer()
         if (cancelled) return
+        console.debug('[PlaybackTimeline] Fetched', raw.byteLength, 'bytes, decoding…')
 
         // Temporary AC only for decoding — close it immediately after
         tmpAc = new (window.AudioContext || window.webkitAudioContext)()
