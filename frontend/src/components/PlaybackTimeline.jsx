@@ -12,9 +12,11 @@
  */
 import { useRef, useEffect, useState, useCallback } from 'react'
 
-// Visual severity: off-tune notes are visually dominant, good notes are subtle
+// Visual severity: off-tune notes are visually dominant, good notes are subtle.
+// 'unknown' = onset detected but pitch could not be determined (freq_hz === 0).
 function noteSeverity(cents) {
-  const a = Math.abs(cents ?? 60)
+  if (cents === null || cents === undefined) return 'unknown'
+  const a = Math.abs(cents)
   if (a < 18) return 'good'
   if (a < 38) return 'close'
   return 'off'
@@ -27,6 +29,7 @@ const C = {
   good:      '#22c55e',
   close:     '#eab308',
   off:       '#ef4444',
+  unknown:   '#6b7280',  // gray — onset detected, pitch unknown
   playhead:  '#F5A623',
 }
 
@@ -108,7 +111,7 @@ function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes,
 
   // ── Note markers — errors dominant, good notes subtle ─────────────────────
   const sorted = [...detectedNotes].sort((a, b) => {
-    const order = { good: 0, close: 1, off: 2 }
+    const order = { good: 0, unknown: 1, close: 2, off: 3 }
     return order[noteSeverity(a.cents)] - order[noteSeverity(b.cents)]
   })
 
@@ -131,6 +134,10 @@ function buildOffscreen(physW, physH, totalSec, audioBuffer, bpm, detectedNotes,
       oc.globalAlpha = 0.8; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 5
       oc.beginPath(); oc.arc(x, 12, 4.5, 0, Math.PI * 2); oc.fill()
       oc.shadowBlur = 0
+    } else if (sev === 'unknown') {
+      // Pitch-unknown onset: small gray dot, no glow
+      oc.globalAlpha = 0.55; oc.fillStyle = col
+      oc.beginPath(); oc.arc(x, 12, 4, 0, Math.PI * 2); oc.fill()
     } else {
       oc.globalAlpha = 0.50; oc.fillStyle = col; oc.shadowColor = col; oc.shadowBlur = 3
       oc.beginPath(); oc.arc(x, 12, 3, 0, Math.PI * 2); oc.fill()

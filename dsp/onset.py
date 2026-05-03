@@ -68,14 +68,16 @@ def _pick_peaks(odf: np.ndarray, threshold: float = 0.3,
 
     # Adaptive threshold: mean + threshold * std
     adaptive_thresh = np.mean(odf) + threshold * np.std(odf)
-    # Also apply a minimum absolute threshold
-    abs_thresh = threshold * np.max(odf) if np.max(odf) > 0 else 0
-
-    effective_thresh = max(adaptive_thresh, abs_thresh)
+    # Do NOT use abs_thresh = threshold * max — that would suppress quiet notes
+    # whenever one loud note inflates the max.
+    effective_thresh = adaptive_thresh
 
     peaks = []
     last_peak = -min_interval  # allow first frame
 
+    # Use adaptive threshold ONLY — absolute threshold (fraction of loudest peak)
+    # would suppress notes quieter than threshold*max, which kills soft notes.
+    # Adaptive = mean + k*std naturally adapts to the recording level.
     for i in range(1, len(odf) - 1):
         # Local maximum check
         if odf[i] > odf[i - 1] and odf[i] >= odf[i + 1]:

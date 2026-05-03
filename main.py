@@ -54,8 +54,11 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
         threshold=config.dsp.yin_threshold,
     )
 
-    # Filter to voiced frames only
-    voiced = [p for p in pitch_results if p["freq_hz"] > 0 and p["confidence"] > 0.5]
+    # Filter to voiced frames only.
+    # Use 0.3 (not 0.5): YIN returns freq>0 even without a clear pitch (global-min
+    # fallback). Frames with confidence 0.3–0.5 are legitimate guitar notes,
+    # especially in the sustain phase after the transient.
+    voiced = [p for p in pitch_results if p["freq_hz"] > 0 and p["confidence"] > 0.3]
     print(f"  Detected {len(voiced)} voiced frames out of {len(pitch_results)} total")
 
     # --- Onset detection ---
@@ -69,18 +72,37 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
     print(f"  Detected {len(onsets)} note onsets")
 
     # --- Build detected notes (pitch at each onset) ---
+    # Rules:
+    #   1. Prefer pitch frames that arrive AFTER the onset (guitar transient precedes
+    #      stable pitch by 20-150ms). Search window: 50ms before → 250ms after.
+    #   2. Each voiced frame can only be used once (nearest-onset wins first).
+    #   3. Never silently drop an onset — if no voiced frame is found, add the note
+    #      with freq_hz=0 / cents=None so the frontend can still show a marker.
     detected_notes = []
+    used_voiced_indices = set()
+
     for onset in onsets:
         onset_time = onset["time_s"]
-        # Find the closest pitched frame to this onset
         best = None
-        best_dt = float("inf")
-        for pf in voiced:
-            dt = abs(pf["time_s"] - onset_time)
-            if dt < best_dt:
-                best_dt = dt
-                best = pf
-        if best and best_dt < 0.1:  # within 100ms
+        best_score = float("inf")
+        best_idx = -1
+
+        for idx, pf in enumerate(voiced):
+            if idx in used_voiced_indices:
+                continue
+            dt = pf["time_s"] - onset_time  # positive = frame is AFTER onset
+            # Accept frames from 50ms before to 250ms after the onset.
+            # Guitar: transient fires, then pitch stabilises 20-150ms later.
+            if -0.05 <= dt <= 0.25:
+                # Prefer frames slightly after the onset (lower dt = closer in time)
+                score = abs(dt)
+                if score < best_score:
+                    best_score = score
+                    best = pf
+                    best_idx = idx
+
+        if best is not None:
+            used_voiced_indices.add(best_idx)
             note_name, octave, cents = freq_to_note(best["freq_hz"], config.reference_pitch_hz)
             note_str = f"{note_name}{octave}"
             detected_notes.append({
@@ -91,8 +113,22 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
                 "cents": round(cents, 1),
                 "onset_strength": round(onset["strength"], 3),
             })
+        else:
+            # Onset detected but pitch could not be determined.
+            # Still include so the frontend can render an "unknown" marker —
+            # never silently discard onset events.
+            detected_notes.append({
+                "time_s": round(onset_time, 3),
+                "freq_hz": 0.0,
+                "confidence": 0.0,
+                "note": "?",
+                "cents": None,   # None = unknown, distinct from 0 = in-tune
+                "onset_strength": round(onset["strength"], 3),
+            })
 
-    print(f"  Matched {len(detected_notes)} notes to onsets")
+    print(f"  Matched {len(detected_notes)} notes to onsets "
+          f"({sum(1 for n in detected_notes if n['freq_hz'] > 0)} with pitch, "
+          f"{sum(1 for n in detected_notes if n['freq_hz'] == 0)} pitch-unknown)")
 
     # --- Amplitude ---
     print("Computing amplitude...")
