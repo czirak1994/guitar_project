@@ -15,8 +15,15 @@ RUN cd frontend && npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install system dependencies needed for audio processing
-RUN apt-get update && apt-get install -y libsndfile1 && rm -rf /var/lib/apt/lists/*
+# Install system dependencies needed for audio processing and aubio compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 \
+        libaubio-dev \
+        libaubio5 \
+        pkg-config \
+        gcc \
+        python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
 COPY requirements.txt .
