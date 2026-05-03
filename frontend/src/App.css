@@ -1210,13 +1210,9 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  /* 'both' = starts at 0% keyframe (hidden) and stays at 100% keyframe (visible) */
+  animation: beat-pop 300ms ease-out both;
   transition: transform 0.15s ease;
-  /* Hidden until JS triggers visible class */
-  opacity: 0;
-  transform: scale(0);
-}
-.beat-circle--visible {
-  animation: beat-pop 300ms ease-out forwards;
 }
 .beat-circle:hover {
   transform: scale(1.15) !important;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 
 // ── BeatGrid helpers ──────────────────────────────────────────────────────────
 
@@ -72,17 +72,12 @@ function generateCells(onTimeRatio, accuracyPct, timingErrorMs, count) {
 
 function BeatCircle({ state, label, tooltip, delayMs, beatNumber }) {
   const [hovered, setHovered] = useState(false)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), delayMs)
-    return () => clearTimeout(t)
-  }, [delayMs])
 
   return (
     <div className="beat-cell">
       <div
-        className={`beat-circle beat-circle--${state}${visible ? ' beat-circle--visible' : ''}`}
+        className={`beat-circle beat-circle--${state}`}
+        style={{ animationDelay: `${delayMs}ms` }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         title={tooltip}
