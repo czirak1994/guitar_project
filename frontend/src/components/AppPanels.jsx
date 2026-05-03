@@ -440,9 +440,10 @@ export function SessionHistoryPanel({ sessionHistory, historyEndRef }) {
     </div>
   )
 }
-
 // ── AIChatBubble ─────────────────────────────────────────────────────────────
-export function AIChatBubble({ message, dspMetrics }) {
+export function AIChatBubble({ message, dspMetrics, audioUrl }) {
+  const [expanded, setExpanded] = useState(false)
+
   if (message.status === 'analyzing') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -476,11 +477,21 @@ export function AIChatBubble({ message, dspMetrics }) {
 
   const d = message.ai_data
 
+  // Truncate diagnosis to first 2 sentences
+  function shortDiagnosis(text) {
+    if (!text) return null
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text]
+    return sentences.slice(0, 2).join(' ').trim()
+  }
+
+  const hasDetails = d && (d.specific_issues?.length || d.actionable_fixes?.length || d.focused_exercise)
+
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
       <div style={{
-        maxWidth: '80%',
-        padding: '14px 18px',
+        maxWidth: '92%',
+        width: '100%',
+        padding: '14px 16px',
         background: 'var(--bg-deep)',
         border: message.status === 'error' ? '1px solid rgba(220,50,50,0.4)' : '1px solid var(--border)',
         borderRadius: '16px 16px 16px 4px',
@@ -490,50 +501,87 @@ export function AIChatBubble({ message, dspMetrics }) {
       }}>
         {d ? (
           <>
-            {d.diagnosis && (
-              <p style={{ marginTop: 0, marginBottom: 12 }}>{d.diagnosis}</p>
-            )}
-            {d.specific_issues?.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Issues</div>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  {d.specific_issues.map((issue, i) => (
-                    <li key={i} style={{ marginBottom: 3 }}>{issue}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {d.actionable_fixes?.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Fixes</div>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  {d.actionable_fixes.map((fix, i) => (
-                    <li key={i} style={{ marginBottom: 3 }}>{fix}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {d.focused_exercise && d.focused_exercise !== 'null' && (
-              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,178,50,0.07)', border: '1px solid rgba(255,178,50,0.2)', borderRadius: 8 }}>
-                <div style={{ fontWeight: 600, color: 'var(--yellow)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Exercise</div>
-                <div>{d.focused_exercise}</div>
-              </div>
-            )}
-            {d.follow_up_question && (
-              <div style={{ marginTop: 12, fontStyle: 'italic', color: 'var(--text-2)', fontSize: '0.86rem' }}>
-                {d.follow_up_question}
-              </div>
-            )}
-            {/* Beat Grid — shown when DSP metrics are available */}
+            {/* 1. BEAT GRID — first and most prominent */}
             {dspMetrics && (
-              <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div style={{ marginBottom: 14 }}>
                 <FeedbackGrid
                   onTimeRatio={dspMetrics.on_time_ratio}
                   accuracyPct={dspMetrics.accuracy_pct}
                   timingErrorMs={dspMetrics.timing_error_ms}
+                  audioUrl={audioUrl}
                   beatCount={8}
                 />
               </div>
+            )}
+
+            {/* 2. SHORT DIAGNOSIS — max 2 sentences */}
+            {d.diagnosis && (
+              <p style={{ margin: '0 0 10px', color: 'var(--text-2)', fontSize: '0.86rem', lineHeight: 1.55 }}>
+                {shortDiagnosis(d.diagnosis)}
+              </p>
+            )}
+
+            {/* 3. FOLLOW-UP QUESTION */}
+            {d.follow_up_question && (
+              <div style={{ marginBottom: 10, fontStyle: 'italic', color: 'var(--text-2)', fontSize: '0.84rem' }}>
+                {d.follow_up_question}
+              </div>
+            )}
+
+            {/* 4. COLLAPSIBLE FULL ANALYSIS */}
+            {hasDetails && (
+              <>
+                <button
+                  onClick={() => setExpanded(e => !e)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-3)',
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    padding: '4px 0',
+                    fontFamily: 'inherit',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '2px',
+                  }}
+                >
+                  {expanded ? '▲ Hide full analysis' : '▼ See full analysis'}
+                </button>
+
+                {expanded && (
+                  <div style={{ marginTop: 12 }}>
+                    {d.specific_issues?.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>What to fix</div>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {d.specific_issues.map((issue, i) => (
+                            <li key={i} style={{ marginBottom: 3 }}>{issue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {d.actionable_fixes?.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontWeight: 600, color: 'var(--green)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>How to fix it</div>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {d.actionable_fixes.map((fix, i) => (
+                            <li key={i} style={{ marginBottom: 3 }}>{fix}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {d.focused_exercise && d.focused_exercise !== 'null' && (
+                      <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(255,178,50,0.07)', border: '1px solid rgba(255,178,50,0.2)', borderRadius: 8 }}>
+                        <div style={{ fontWeight: 600, color: 'var(--yellow)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Practice this</div>
+                        <div>{d.focused_exercise}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </>
         ) : (
@@ -630,6 +678,7 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
               key={m.id || i}
               message={m}
               dspMetrics={m.status === 'done' && m.ai_data ? latestMetrics : null}
+              audioUrl={m.status === 'done' && m.ai_data ? (messages[i - 1]?.audio_url || null) : null}
             />
           )
         ))}

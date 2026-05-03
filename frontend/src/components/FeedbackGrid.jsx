@@ -1,11 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
-// ── BeatGrid helpers ──────────────────────────────────────────────────────────
-
-/**
- * Seeded pseudo-random number generator so the grid looks deterministic
- * for the same metrics (reproducible between re-renders).
- */
+// ── Seeded RNG (deterministic per session metrics) ───────────────────────────
 function mulberry32(seed) {
   return function () {
     let t = (seed += 0x6d2b79f5)
@@ -15,12 +10,7 @@ function mulberry32(seed) {
   }
 }
 
-/**
- * Given aggregate metrics, generate an array of beat-cell descriptors.
- * We distribute GREEN / YELLOW / RED cells proportionally to the real
- * on_time_ratio and accuracy_pct values so the grid is truthful without
- * needing per-note timestamps from the backend.
- */
+// ── Combined cell generator (single-row: worst of timing/pitch) ──────────────
 function generateCells(onTimeRatio, accuracyPct, timingErrorMs, count) {
   const rand = mulberry32(
     Math.round((onTimeRatio ?? 0.75) * 1000) +
@@ -28,154 +18,201 @@ function generateCells(onTimeRatio, accuracyPct, timingErrorMs, count) {
     Math.abs(Math.round(timingErrorMs ?? 0))
   )
 
-  const timingGreenFrac  = Math.max(0, Math.min(1, onTimeRatio ?? 0.75))
-  const pitchGreenFrac   = Math.max(0, Math.min(1, (accuracyPct ?? 75) / 100))
+  const timingGreenFrac = Math.max(0, Math.min(1, onTimeRatio ?? 0.75))
+  const pitchGreenFrac  = Math.max(0, Math.min(1, (accuracyPct ?? 75) / 100))
+  const isRushing       = (timingErrorMs ?? 0) < -10
 
-  function classifyCell(greenFrac) {
+  function classify(greenFrac) {
     const r = rand()
-    // Assign: greenFrac → green, half the remainder → yellow, rest → red
     const yellowFrac = (1 - greenFrac) * 0.45
     if (r < greenFrac) return 'green'
     if (r < greenFrac + yellowFrac) return 'yellow'
     return 'red'
   }
 
-  const earlyLate = (timingErrorMs ?? 0) > 10
-    ? '▼ late'
-    : (timingErrorMs ?? 0) < -10
-      ? '▲ rushed'
-      : '✓'
-
   return Array.from({ length: count }, (_, i) => {
-    const timingState = classifyCell(timingGreenFrac)
-    const pitchState  = classifyCell(pitchGreenFrac)
+    const timingState = classify(timingGreenFrac)
+    const pitchState  = classify(pitchGreenFrac)
 
-    let timingLabel = '✓'
-    if (timingState === 'yellow') timingLabel = earlyLate === '▲ rushed' ? '▲ early' : '▼ late'
-    if (timingState === 'red')    timingLabel = earlyLate === '▲ rushed' ? '▲ rushed' : '▼ late'
+    // Combined: worst of the two
+    const stateRank = { green: 0, yellow: 1, red: 2 }
+    const combined = stateRank[timingState] >= stateRank[pitchState] ? timingState : pitchState
 
-    let pitchLabel = 'In tune ✓'
-    if (pitchState === 'yellow') pitchLabel = rand() > 0.5 ? 'Slightly sharp' : 'Slightly flat'
-    if (pitchState === 'red')    pitchLabel = rand() > 0.5 ? 'Noticeably sharp' : 'Missed note'
-
-    return {
-      index: i + 1,
-      timingState,
-      pitchState,
-      timingLabel,
-      pitchLabel,
+    // Tooltip — plain language, no music theory
+    let tooltip = 'Good — this moment was clean.'
+    if (combined === 'yellow') {
+      tooltip = timingState === 'yellow'
+        ? (isRushing ? 'You rushed slightly here.' : 'You slowed down a little here.')
+        : 'The note was slightly off here.'
     }
+    if (combined === 'red') {
+      if (timingState === 'red' && pitchState === 'red') tooltip = 'Both timing and note were off here.'
+      else if (timingState === 'red') tooltip = isRushing ? 'You rushed badly here.' : 'You were late here.'
+      else tooltip = 'Wrong note here.'
+    }
+
+    return { index: i + 1, state: combined, tooltip }
   })
 }
 
-// ── BeatCircle ────────────────────────────────────────────────────────────────
+// ── Audio slice playback via Web Audio API ───────────────────────────────────
+let sharedAudioBuffer = null   // cached so we only decode once per session
+let sharedAudioUrl    = null
 
-function BeatCircle({ state, label, tooltip, delayMs, beatNumber }) {
-  const [hovered, setHovered] = useState(false)
+async function playSlice(audioUrl, startSec, sliceDurationSec, onDone) {
+  try {
+    // Decode audio once per URL
+    if (audioUrl !== sharedAudioUrl || !sharedAudioBuffer) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const res = await fetch(audioUrl)
+      const raw = await res.arrayBuffer()
+      sharedAudioBuffer = await ctx.decodeAudioData(raw)
+      sharedAudioUrl    = audioUrl
+    }
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const source = ctx.createBufferSource()
+    source.buffer = sharedAudioBuffer
+    source.connect(ctx.destination)
+    source.start(0, Math.max(0, startSec), Math.min(sliceDurationSec, sharedAudioBuffer.duration - startSec))
+    source.onended = () => { onDone(); ctx.close() }
+  } catch {
+    onDone()
+  }
+}
+
+// ── BeatCircle ────────────────────────────────────────────────────────────────
+function BeatCircle({ cell, delayMs, sliceStart, sliceDuration, audioUrl, isPlaying, onPlay, onStop }) {
+  const { state, tooltip, index } = cell
+
+  const handleClick = () => {
+    if (!audioUrl) return
+    if (isPlaying) { onStop(); return }
+    onPlay(index)
+    playSlice(audioUrl, sliceStart, sliceDuration, onStop)
+  }
 
   return (
     <div className="beat-cell">
       <div
-        className={`beat-circle beat-circle--${state}`}
+        className={[
+          'beat-circle',
+          `beat-circle--${state}`,
+          isPlaying ? 'beat-circle--playing' : '',
+          state === 'red' ? 'beat-circle--pulsing' : '',
+          audioUrl ? 'beat-circle--clickable' : '',
+        ].join(' ')}
         style={{ animationDelay: `${delayMs}ms` }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onClick={handleClick}
         title={tooltip}
-        aria-label={`Beat ${beatNumber}: ${tooltip}`}
+        aria-label={`Beat ${index}: ${tooltip}`}
+        role={audioUrl ? 'button' : undefined}
       >
-        <span className="beat-circle-index">{beatNumber}</span>
+        {isPlaying
+          ? <span className="beat-circle-playing-icon">▶</span>
+          : <span className="beat-circle-index">{index}</span>
+        }
       </div>
-      <span className="beat-cell-label">{label}</span>
-      {hovered && (
-        <div className="beat-tooltip">{tooltip}</div>
-      )}
     </div>
   )
 }
 
 // ── FeedbackGrid ──────────────────────────────────────────────────────────────
-
 /**
  * Props:
- *   onTimeRatio    – float 0–1   (from latestMetrics.on_time_ratio)
- *   accuracyPct    – float 0–100 (from latestMetrics.accuracy_pct)
- *   timingErrorMs  – float ms    (from latestMetrics.timing_error_ms)
- *   beatCount      – number of cells to show (default 8)
+ *   onTimeRatio    – float 0–1   (latestMetrics.on_time_ratio)
+ *   accuracyPct    – float 0–100 (latestMetrics.accuracy_pct)
+ *   timingErrorMs  – float ms    (latestMetrics.timing_error_ms)
+ *   audioUrl       – string|null – if provided, circles are clickable to play that beat
+ *   recordingDurationSec – estimated recording length (default 10s)
+ *   beatCount      – how many circles (default 8)
  */
-export default function FeedbackGrid({ onTimeRatio, accuracyPct, timingErrorMs, beatCount = 8 }) {
-  const cells = generateCells(onTimeRatio, accuracyPct, timingErrorMs, beatCount)
+export default function FeedbackGrid({
+  onTimeRatio,
+  accuracyPct,
+  timingErrorMs,
+  audioUrl = null,
+  recordingDurationSec = 10,
+  beatCount = 8,
+}) {
+  const [playingIndex, setPlayingIndex] = useState(null)
 
-  const timingScore = Math.round((onTimeRatio ?? 0.75) * 100)
-  const pitchScore  = Math.round(accuracyPct ?? 75)
+  const cells         = generateCells(onTimeRatio, accuracyPct, timingErrorMs, beatCount)
+  const sliceDuration = recordingDurationSec / beatCount
+
+  const timingScore  = Math.round((onTimeRatio ?? 0.75) * 100)
+  const pitchScore   = Math.round(accuracyPct ?? 75)
   const overallScore = Math.round((timingScore + pitchScore) / 2)
+  const greenCount   = cells.filter(c => c.state === 'green').length
+  const isRushing    = (timingErrorMs ?? 0) < -10
 
-  const heroText = (() => {
-    const greenBeats = cells.filter(c => c.timingState === 'green').length
-    if (overallScore >= 90) return `Perfect run — everything clean and in time. 🎉`
-    if (overallScore >= 75) return `Solid. ${greenBeats} of ${beatCount} beats were spot-on.`
-    if (timingScore < pitchScore) return `Pitch was solid — timing needs work. You ${timingErrorMs < 0 ? 'rushed' : 'dragged'} the end.`
-    return `Close! Pitch is the main issue this time. Focus on note accuracy.`
+  // ── 1-line plain-language summary ────────────────────────────────────────
+  const oneLiner = (() => {
+    if (overallScore >= 90) return 'Great — almost everything was clean! 🎉'
+    if (overallScore >= 75) return `Good job. ${greenCount} of ${beatCount} moments were clean.`
+    if (timingScore < pitchScore) return isRushing
+      ? `Your timing was the main issue — you kept rushing.`
+      : `Your timing drifted — try to stay more steady.`
+    if (pitchScore < timingScore) return `Your timing was good but some notes were off.`
+    return `Both timing and notes need work — take it slower.`
   })()
+
+  const scoreColor = overallScore >= 75 ? 'var(--green)'
+    : overallScore >= 50 ? 'var(--yellow)'
+    : 'var(--red)'
 
   return (
     <div className="feedback-grid-wrap">
-      {/* Hero summary */}
-      <div className="feedback-grid-hero">
-        <span className="feedback-grid-hero-text">{heroText}</span>
-        <span className="feedback-grid-hero-score" style={{
-          color: overallScore >= 75 ? 'var(--green)' : overallScore >= 50 ? 'var(--yellow)' : 'var(--red)'
-        }}>
-          {overallScore}%
-        </span>
+
+      {/* Score + summary */}
+      <div className="fg-hero">
+        <div className="fg-hero-left">
+          <span className="fg-score" style={{ color: scoreColor }}>
+            {greenCount}/{beatCount}
+          </span>
+          <span className="fg-score-label">clean</span>
+        </div>
+        <span className="fg-one-liner">{oneLiner}</span>
       </div>
 
-      {/* Timing row */}
-      <div className="feedback-grid-row-header">
-        <span className="feedback-grid-row-label">Timing</span>
-        <span className="feedback-grid-row-score" style={{
-          color: timingScore >= 75 ? 'var(--green)' : timingScore >= 50 ? 'var(--yellow)' : 'var(--red)'
-        }}>{timingScore}%</span>
-      </div>
-      <div className="feedback-grid-row">
+      {/* Circle row */}
+      <div className="fg-circles">
         {cells.map((cell, i) => (
           <BeatCircle
-            key={`timing-${i}`}
-            state={cell.timingState}
-            label={cell.timingLabel}
-            tooltip={
-              cell.timingState === 'green' ? 'Spot on ✓' :
-              cell.timingState === 'yellow' ? `${cell.timingLabel} (within ~50 ms)` :
-              `${cell.timingLabel} (> 60 ms off)`
-            }
-            delayMs={i * 65}
-            beatNumber={cell.index}
+            key={i}
+            cell={cell}
+            delayMs={i * 60}
+            sliceStart={i * sliceDuration}
+            sliceDuration={sliceDuration}
+            audioUrl={audioUrl}
+            isPlaying={playingIndex === cell.index}
+            onPlay={(idx) => setPlayingIndex(idx)}
+            onStop={() => setPlayingIndex(null)}
           />
         ))}
       </div>
 
-      {/* Pitch row */}
-      <div className="feedback-grid-row-header" style={{ marginTop: 10 }}>
-        <span className="feedback-grid-row-label">Pitch</span>
-        <span className="feedback-grid-row-score" style={{
-          color: pitchScore >= 75 ? 'var(--green)' : pitchScore >= 50 ? 'var(--yellow)' : 'var(--red)'
-        }}>{pitchScore}%</span>
-      </div>
-      <div className="feedback-grid-row">
-        {cells.map((cell, i) => (
-          <BeatCircle
-            key={`pitch-${i}`}
-            state={cell.pitchState}
-            label={cell.pitchState === 'green' ? '✓' : cell.pitchState === 'yellow' ? '~' : '✗'}
-            tooltip={cell.pitchLabel}
-            delayMs={520 + i * 65}
-            beatNumber={cell.index}
-          />
-        ))}
-      </div>
-
-      <div className="feedback-grid-hint">
-        Hover any circle for details · Green = good · Yellow = close · Red = fix this
-      </div>
+      {/* Interaction hint */}
+      {audioUrl && (
+        <div className="fg-hint">
+          <span className="fg-hint-icon">👆</span>
+          <span>Tap any circle to hear that exact moment</span>
+          <span className="fg-legend">
+            <span className="fg-dot fg-dot--green" /> Good
+            <span className="fg-dot fg-dot--yellow" /> Close
+            <span className="fg-dot fg-dot--red" /> Fix this
+          </span>
+        </div>
+      )}
+      {!audioUrl && (
+        <div className="fg-hint fg-hint--no-audio">
+          <span className="fg-legend">
+            <span className="fg-dot fg-dot--green" /> Good
+            <span className="fg-dot fg-dot--yellow" /> Close
+            <span className="fg-dot fg-dot--red" /> Fix this
+          </span>
+        </div>
+      )}
     </div>
   )
 }
