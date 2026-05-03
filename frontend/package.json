@@ -12,6 +12,7 @@
   "dependencies": {
     "@clerk/clerk-react": "^5.61.5",
     "axios": "^1.15.0",
+    "pitchfinder": "^2.3.4",
     "pitchy": "^4.1.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

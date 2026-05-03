@@ -340,14 +340,27 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             new_session.focus = focus
             new_session.style = style
             # Store detected notes so they survive page refresh.
-            # If the frontend sent its own DSP-detected notes, prefer those — they
-            # come from a higher-quality pitchy pipeline and are already debounced.
+            # Frontend sends its own YIN-detected notes — always prefer those.
+            # When frontend notes are present, also recompute timing metrics from
+            # them so the stats widget (accuracy_pct, timing_error_ms, on_time_ratio)
+            # matches the timeline rather than the backend's separate detection run.
             frontend_notes_raw = request.form.get('frontend_notes')
             if frontend_notes_raw:
                 try:
                     detected_notes = json.loads(frontend_notes_raw)
                     print(f"[Notes] Using {len(detected_notes)} frontend-detected notes")
-                except Exception:
+                    if detected_notes:
+                        from analysis.timing import TimingAnalyzer
+                        onset_times = [n['time_s'] for n in detected_notes]
+                        _ta = TimingAnalyzer(tolerance_ms=config.analysis.timing_tolerance_ms)
+                        _tr = _ta.analyze_vs_metronome(onset_times, config.analysis.bpm, auto_align=True)
+                        report['timing_error_ms']    = round(_tr.mean_deviation_ms, 1)
+                        report['on_time_ratio']      = round(_tr.on_time_ratio, 3)
+                        report['timing_consistency'] = round(_tr.consistency_score, 1)
+                        print(f"[Notes] Recomputed timing from frontend notes: "
+                              f"err={report['timing_error_ms']}ms on_time={report['on_time_ratio']:.1%}")
+                except Exception as e:
+                    print(f"[Notes] Frontend notes parse error: {e}")
                     detected_notes = report.get('detected_notes', [])
             else:
                 detected_notes = report.get('detected_notes', [])

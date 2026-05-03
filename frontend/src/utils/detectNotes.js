@@ -1,44 +1,44 @@
 /**
  * detectNotes.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Pure frontend DSP note detection using:
- *   • Energy-based onset detection     (RMS threshold + hysteresis)
- *   • Pitchy (McLeod Pitch Method)     for reliable pitch estimation
- *   • Median-3 pitch smoothing         to reject momentary glitches
- *   • 80 ms minimum-gap debounce       to prevent duplicate triggers
- *   • Same-pitch dedup (100 ms / ±1 st) to collapse double-pluck artefacts
- *   • Beat alignment + quantization    auto-aligned phase, signed ms offset
+ * Deterministic, LLM-free note detection pipeline:
+ *   • Pass 1 — collect per-hop RMS + YIN pitch for every frame
+ *   • Pass 2 — onset detection with re-arm gate (silence required between notes)
+ *   • Pass 3 — pitch matching: median of stable frames 20–300 ms after onset
+ *   • Same-pitch dedup (250 ms / ±1 semitone) to collapse any remaining artefacts
+ *   • Beat alignment via 200-candidate phase brute-force
  *
- * Input:  Float32Array PCM samples + sampleRate + optional bpm
+ * Input:  Float32Array PCM samples + sampleRate + optional bpm + optional calibration
  * Output: { notes, duration, beats, phaseS }
  *
- * notes array element format (matches PlaybackTimeline expectations):
- *   { time_s, freq_hz, note, confidence, beat_offset_ms, beat_time_s, timing }
+ * notes element: { time_s, freq_hz, note, confidence, beat_offset_ms, beat_time_s, timing }
  *
  * Usage:
  *   import { detectNotes } from './utils/detectNotes'
  *   const { notes, duration } = detectNotes(pcmSamples, sampleRate, bpm)
  */
 
-import { PitchDetector } from 'pitchy'
+import { YIN } from 'pitchfinder'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const A4_FREQ    = 440.0
 
-/** Guitar frequency range — reject anything outside E2 (82 Hz) … e5 (1318 Hz) */
+/** Guitar frequency range — E2 (82 Hz) to e5 (1318 Hz) with margin */
 const GUITAR_MIN_HZ = 75
 const GUITAR_MAX_HZ = 1400
 
-const FRAME_SIZE       = 2048  // ~46 ms at 44.1 kHz — good resolution for guitar
-const HOP_SIZE         = 512   // ~12 ms step
-const RMS_THRESHOLD    = 0.01  // below this = silence
-const CLARITY_THRESH   = 0.85  // pitchy confidence; guitar fundamental is reliable at 0.85+
-const MIN_NOTE_GAP_MS  = 80    // minimum time between successive notes
-const ONSET_RATIO      = 1.5   // RMS must be ONSET_RATIO × threshold when rising
-const SAME_PITCH_SEMI  = 1     // ± semitones for same-pitch dedup
-const SAME_PITCH_MS    = 100   // max gap for same-pitch dedup
+const FRAME_SIZE        = 2048  // ~46 ms at 44.1 kHz
+const HOP_SIZE          = 512   // ~12 ms step
+const RMS_THRESHOLD     = 0.01  // below this = silence
+const ONSET_RATIO       = 2.0   // RMS must be 2× threshold to count as an onset
+const MIN_NOTE_GAP_MS   = 150   // hard floor — prevents double-trigger if re-arm fails
+const SAME_PITCH_SEMI   = 1     // ±1 semitone for same-pitch dedup
+const SAME_PITCH_MS     = 250   // max gap for same-pitch dedup
+const PITCH_WIN_MIN_MS  = 20    // earliest frame to sample pitch after onset
+const PITCH_WIN_MAX_MS  = 300   // latest frame to sample pitch after onset
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function calcRms(buf) {
@@ -47,21 +47,13 @@ function calcRms(buf) {
   return Math.sqrt(s / buf.length)
 }
 
-function median3(a, b, c) {
-  if (a <= b) {
-    if (b <= c) return b   // a ≤ b ≤ c
-    if (a <= c) return c   // a ≤ c < b
-    return a               // c < a ≤ b
-  }
-  // b < a
-  if (a <= c) return a     // b < a ≤ c
-  if (b <= c) return c     // b ≤ c < a
-  return b                 // c < b < a
+function medianOf(arr) {
+  if (!arr.length) return 0
+  const sorted = arr.slice().sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-/**
- * Convert frequency in Hz to a note name string like "A4" or "E2".
- */
 function freqToNoteName(freq) {
   if (!freq || freq < 20) return '?'
   const semitones = 12 * Math.log2(freq / A4_FREQ)
@@ -70,37 +62,32 @@ function freqToNoteName(freq) {
   const name      = NOTE_NAMES[((midi % 12) + 12) % 12]
   return `${name}${octave}`
 }
+
 function freqToMidi(freq) {
   if (!freq || freq < 20) return -1
   return Math.round(12 * Math.log2(freq / A4_FREQ)) + 69
 }
 
 /**
- * Remove notes that are the same pitch (±SAME_PITCH_SEMI semitones) as the
- * immediately preceding note AND within SAME_PITCH_MS — keeps only the first.
- * Assumes notes are already sorted by time_s.
+ * Remove notes that are the same pitch (±SAME_PITCH_SEMI) AND within
+ * SAME_PITCH_MS of the previous note — keeps only the first occurrence.
  */
 function mergeSimilarNotes(notes) {
   if (!notes.length) return notes
   const out = [notes[0]]
   for (let i = 1; i < notes.length; i++) {
-    const prev = out[out.length - 1]
+    const prev  = out[out.length - 1]
     const gapMs = (notes[i].time_s - prev.time_s) * 1000
     if (gapMs <= SAME_PITCH_MS) {
       const semiDiff = Math.abs(freqToMidi(notes[i].freq_hz) - freqToMidi(prev.freq_hz))
-      if (semiDiff <= SAME_PITCH_SEMI) continue   // skip — same note, too soon
+      if (semiDiff <= SAME_PITCH_SEMI) continue
     }
     out.push(notes[i])
   }
   return out
 }
 
-/**
- * Auto-detect grid phase by minimising Σ|note − nearest_beat|.
- * Mirrors the same algorithm in PlaybackTimeline.jsx (findBeatPhase)
- * so that both use the same phase and produce consistent coloring.
- * Returns phase in SECONDS.
- */
+/** Auto-align beat grid phase — mirrors PlaybackTimeline.findBeatPhase */
 function computeBeatPhase(noteTimes_s, beatSec) {
   if (!noteTimes_s.length || beatSec <= 0) return 0
   let bestPhase = 0, bestErr = Infinity
@@ -116,16 +103,13 @@ function computeBeatPhase(noteTimes_s, beatSec) {
   return bestPhase
 }
 
-/**
- * Signed beat offset in ms for a note at timeS seconds.
- * Negative = early (played before beat), positive = late (played after beat).
- */
 function signedBeatOffsetMs(timeS, beatSec, phaseS) {
   if (beatSec <= 0) return 0
   const pos    = ((timeS - phaseS) % beatSec + beatSec) % beatSec
   const signed = pos > beatSec / 2 ? pos - beatSec : pos
   return Math.round(signed * 1000 * 10) / 10
 }
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -133,15 +117,12 @@ function signedBeatOffsetMs(timeS, beatSec, phaseS) {
  *
  * @param {Float32Array} samples     Raw audio samples (mono, any sample rate)
  * @param {number}       sampleRate
- * @param {number}       [bpm=120]   BPM from the UI metronome
- * @returns {{ notes: Array, duration: number, beats: number[], phaseS: number }}
- */
-/**
- * @param {object|null} [calibration]  Optional calibration data from CalibrationModal
+ * @param {number}       [bpm=120]
+ * @param {object|null}  [calibration]
  *   calibration.thresholdRms  — measured onset threshold (replaces RMS_THRESHOLD)
- *   calibration.avgOffsetMs   — user's systematic timing bias in ms; subtracted
- *                                from every beat_offset_ms so the coloring is
- *                                bias-corrected (not applied to time_s itself)
+ *   calibration.avgOffsetMs   — systematic timing bias in ms; subtracted from
+ *                                beat_offset_ms (bias-correction, not raw time)
+ * @returns {{ notes: Array, duration: number, beats: number[], phaseS: number }}
  */
 export function detectNotes(samples, sampleRate, bpm = 120, calibration = null) {
   const rmsThreshold = calibration?.thresholdRms ?? RMS_THRESHOLD
@@ -149,107 +130,122 @@ export function detectNotes(samples, sampleRate, bpm = 120, calibration = null) 
 
   const beatSec = 60 / bpm
   const beatMs  = 60000 / bpm
-  const detector   = PitchDetector.forFloat32Array(FRAME_SIZE)
-  const frame      = new Float32Array(FRAME_SIZE)
 
-  const notes      = []
-  let prevRms      = 0
-  let lastNoteMs   = -Infinity
-  const pitchBuf   = []   // last ≤3 valid pitches for smoothing
+  // Create YIN detector once — reused for every frame
+  const yin = YIN({ sampleRate, threshold: 0.10 })
+  const frame = new Float32Array(FRAME_SIZE)
 
-  const totalHops  = Math.floor((samples.length - FRAME_SIZE) / HOP_SIZE)
+  const totalHops = Math.floor((samples.length - FRAME_SIZE) / HOP_SIZE)
+
+  // ── Pass 1: collect per-hop RMS + pitch ──────────────────────────────────
+  // We defer onset detection to pass 2 so pitch data from AFTER the onset
+  // is available when we decide where the note boundary is.
+  const hopData = []  // { ms, rms, pitch: number|null }
 
   for (let hop = 0; hop <= totalHops; hop++) {
     const start = hop * HOP_SIZE
-
-    // Copy frame (pitchy needs a dense Float32Array, not a subarray view)
-    const end = Math.min(start + FRAME_SIZE, samples.length)
+    const end   = Math.min(start + FRAME_SIZE, samples.length)
     frame.set(samples.subarray(start, end))
     if (end < start + FRAME_SIZE) frame.fill(0, end - start)
 
     const rms   = calcRms(frame)
     const nowMs = (start / sampleRate) * 1000
 
-    // ── Silence gate ────────────────────────────────────────────────────────
+    let pitch = null
+    if (rms >= rmsThreshold) {
+      const detected = yin(frame)
+      if (detected !== null && detected >= GUITAR_MIN_HZ && detected <= GUITAR_MAX_HZ) {
+        pitch = detected
+      }
+    }
+
+    hopData.push({ ms: nowMs, rms, pitch })
+  }
+
+  // ── Pass 2: onset detection with re-arm gate ─────────────────────────────
+  // After each onset the gate disarms. It only re-arms once RMS falls below
+  // rmsThreshold (silence), preventing the double-trigger caused by the
+  // attack transient dip + sustain rise pattern common on guitar.
+  const onsets = []  // onset times in ms
+  let armed       = true
+  let prevRms     = 0
+  let lastOnsetMs = -Infinity
+
+  for (const { ms, rms } of hopData) {
     if (rms < rmsThreshold) {
+      armed   = true   // re-arm: returning from silence
       prevRms = rms
-      pitchBuf.length = 0   // clear history in silence gaps
       continue
     }
 
-    // ── Pitch detection ─────────────────────────────────────────────────────
-    const [pitch, clarity] = detector.findPitch(frame, sampleRate)
-
-    if (pitch !== null && clarity >= CLARITY_THRESH &&
-        pitch >= GUITAR_MIN_HZ && pitch <= GUITAR_MAX_HZ) {
-      pitchBuf.push(pitch)
-      if (pitchBuf.length > 3) pitchBuf.shift()
-    }
-
-    // ── Onset detection ─────────────────────────────────────────────────────
-    // Rising edge: RMS crosses threshold upward AND exceeds hysteresis ratio
-    const isRising  = rms >= rmsThreshold * ONSET_RATIO && prevRms < rmsThreshold * ONSET_RATIO
-    const gapOk     = nowMs - lastNoteMs > MIN_NOTE_GAP_MS
-
-    if (isRising && gapOk && pitchBuf.length > 0) {
-      // Median-3 smoothing (uses whatever we've accumulated — 1, 2, or 3 values)
-      let smoothed
-      if (pitchBuf.length === 3)      smoothed = median3(pitchBuf[0], pitchBuf[1], pitchBuf[2])
-      else if (pitchBuf.length === 2) smoothed = (pitchBuf[0] + pitchBuf[1]) / 2
-      else                             smoothed = pitchBuf[0]
-
-      if (smoothed >= GUITAR_MIN_HZ && smoothed <= GUITAR_MAX_HZ) {
-        notes.push({
-          time_s:         Math.round(nowMs) / 1000,
-          freq_hz:        Math.round(smoothed * 10) / 10,
-          note:           freqToNoteName(smoothed),
-          confidence:     Math.round(clarity * 100) / 100,
-          beat_offset_ms: null,   // overwritten in beat-alignment pass below
-        })
-        lastNoteMs     = nowMs
-        pitchBuf.length = 0   // reset after triggering
-      }
+    // Rising edge crosses the onset hysteresis level while armed
+    if (armed &&
+        rms    >= rmsThreshold * ONSET_RATIO &&
+        prevRms < rmsThreshold * ONSET_RATIO &&
+        ms - lastOnsetMs > MIN_NOTE_GAP_MS) {
+      onsets.push(ms)
+      lastOnsetMs = ms
+      armed = false  // disarm until next silence gap
     }
 
     prevRms = rms
   }
 
-  // ── Step 6: remove same-pitch duplicates ───────────────────────────────────
-  const dedupedNotes = mergeSimilarNotes(notes)
+  // ── Pass 3: match pitch to each onset ────────────────────────────────────
+  // For each onset, take the MEDIAN of YIN pitches in the stable-sustain
+  // window (PITCH_WIN_MIN_MS … PITCH_WIN_MAX_MS after the onset).
+  // This avoids the noisy attack transient and uses the cleaner sustain.
+  const rawNotes = []
 
-  // ── Step 1–4: Beat grid + alignment ──────────────────────────────────────
+  for (const onsetMs of onsets) {
+    const windowPitches = hopData
+      .filter(h =>
+        h.ms >= onsetMs + PITCH_WIN_MIN_MS &&
+        h.ms <= onsetMs + PITCH_WIN_MAX_MS &&
+        h.pitch !== null
+      )
+      .map(h => h.pitch)
+
+    if (!windowPitches.length) continue   // no stable pitch found — skip onset
+
+    const freq = medianOf(windowPitches)
+    if (freq < GUITAR_MIN_HZ || freq > GUITAR_MAX_HZ) continue
+
+    rawNotes.push({
+      time_s:         Math.round(onsetMs) / 1000,
+      freq_hz:        Math.round(freq * 10) / 10,
+      note:           freqToNoteName(freq),
+      confidence:     0.9,  // YIN does not expose per-frame confidence
+      beat_offset_ms: null,
+    })
+  }
+
+  // ── Same-pitch dedup ──────────────────────────────────────────────────────
+  const dedupedNotes = mergeSimilarNotes(rawNotes)
+
+  // ── Beat grid alignment ───────────────────────────────────────────────────
   const duration = samples.length / sampleRate
+  const phaseS   = computeBeatPhase(dedupedNotes.map(n => n.time_s), beatSec)
 
-  // Auto-align phase so beat grid matches the actual playing (same algorithm
-  // as PlaybackTimeline.findBeatPhase — ensures consistent coloring there too)
-  const phaseS = computeBeatPhase(dedupedNotes.map(n => n.time_s), beatSec)
-
-  // Generate the full beat list for debug / UI use
-  const beats = []  // in seconds
+  const beats = []
   for (let t = phaseS; t <= duration + beatSec; t += beatSec) {
     beats.push(Math.round(t * 1000) / 1000)
   }
 
-  // Annotate each note with beat alignment data
   const alignedNotes = dedupedNotes.map(n => {
-    // Apply calibrated timing-bias correction: if user consistently plays
-    // +40 ms late, subtract 40 ms so beat_offset_ms reflects relative accuracy
-    // rather than systematic hardware / reaction lag.  time_s is kept raw.
     const rawOffsetMs = signedBeatOffsetMs(n.time_s, beatSec, phaseS)
     const offsetMs    = Math.round((rawOffsetMs - timingBiasMs) * 10) / 10
     const absMs       = Math.abs(offsetMs)
 
-    // Timing classification
     let timing
-    if (absMs < 20)      timing = 'on'
-    else if (absMs < 60) timing = 'close'
+    if (absMs < 20)        timing = 'on'
+    else if (absMs < 60)   timing = 'close'
     else if (offsetMs < 0) timing = 'early'
     else                   timing = 'late'
 
-    // Nearest beat time
-    const pos       = ((n.time_s - phaseS) % beatSec + beatSec) % beatSec
-    const nearestBeatOffset = pos > beatSec / 2 ? pos - beatSec : pos
-    const beat_time_s = Math.round((n.time_s - nearestBeatOffset) * 1000) / 1000
+    const pos             = ((n.time_s - phaseS) % beatSec + beatSec) % beatSec
+    const nearestBeatOff  = pos > beatSec / 2 ? pos - beatSec : pos
+    const beat_time_s     = Math.round((n.time_s - nearestBeatOff) * 1000) / 1000
 
     return { ...n, beat_offset_ms: offsetMs, beat_time_s, timing }
   })
@@ -259,11 +255,12 @@ export function detectNotes(samples, sampleRate, bpm = 120, calibration = null) 
     bpm,
     beatMs: Math.round(beatMs),
     phaseS: phaseS.toFixed(3),
-    totalNotes: notes.length,
+    onsetsDetected: onsets.length,
+    afterPitchMatch: rawNotes.length,
     afterDedup: dedupedNotes.length,
     rmsThreshold: rmsThreshold.toFixed(5),
     timingBiasMs,
-    beats: beats.slice(0, 8).map(b => b.toFixed(2)),   // first 8 beats
+    beats: beats.slice(0, 8).map(b => b.toFixed(2)),
     offsets: alignedNotes.map(n => ({ note: n.note, time_s: n.time_s, offset_ms: n.beat_offset_ms, timing: n.timing })),
   })
 
