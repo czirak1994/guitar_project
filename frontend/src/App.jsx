@@ -4,6 +4,8 @@ import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
 import { detectNotes } from './utils/detectNotes'
+import { loadCalibration, saveInputCalibration, saveTimingCalibration } from './utils/calibrate'
+import CalibrationModal from './components/CalibrationModal'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -627,6 +629,13 @@ export default function App() {
   const [metroEnabled, setMetroEnabled] = useState(false)
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   const [micSetupOpen, setMicSetupOpen] = useState(false)
+  const [calibrationOpen, setCalibrationOpen] = useState(false)
+  const [audioCalibration, setAudioCalibration] = useState(
+    () => { try { return loadCalibration().input } catch { return null } }
+  )
+  const [timingCalibration, setTimingCalibration] = useState(
+    () => { try { return loadCalibration().timing } catch { return null } }
+  )
 
   // Progressive disclosure state
   const [hasEverRecorded, setHasEverRecorded] = useState(
@@ -806,7 +815,10 @@ export default function App() {
             // Run before encoding so we have the raw Float32 samples at hand.
             // Results are attached to pendingAudio and later sent to the backend.
             const { notes: frontendNotes, duration: frontendDuration } =
-              detectNotes(allSamples, audioCtx.sampleRate)
+              detectNotes(allSamples, audioCtx.sampleRate, bpm, {
+                thresholdRms: audioCalibration?.thresholdRms,
+                avgOffsetMs:  timingCalibration?.avgOffsetMs,
+              })
 
             const wavBlob = encodeWAV(allSamples, audioCtx.sampleRate)
             const wavUrl = URL.createObjectURL(wavBlob)
@@ -995,6 +1007,18 @@ export default function App() {
       }
       inFlightRef.current = false
     }
+  }
+
+  const handleCalibrationComplete = ({ inputCal, timingCal }) => {
+    if (inputCal) {
+      saveInputCalibration(inputCal)
+      setAudioCalibration(inputCal)
+    }
+    if (timingCal) {
+      saveTimingCalibration(timingCal)
+      setTimingCalibration(timingCal)
+    }
+    setCalibrationOpen(false)
   }
 
   const handleDiscardTake = () => {
@@ -1207,7 +1231,7 @@ export default function App() {
                       <YoutubeWidget backingTrack={backingTrack} setBackingTrack={setBackingTrack} disabled={phase === 'recording'} playerRef={playerRef} backingVolume={backingVolume} setBackingVolume={setBackingVolume} />
                       <LatestStatsWidget result={latestMetrics} />
 
-                      <div className="widget" style={{ paddingTop: 12, paddingBottom: 12 }}>
+                      <div className="widget" style={{ paddingTop: 12, paddingBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <button
                           className="btn"
                           style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
@@ -1215,6 +1239,18 @@ export default function App() {
                         >
                           🎙 Microphone setup{selectedDeviceId ? ' ✓' : ''}
                         </button>
+                        <button
+                          className="btn"
+                          style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderColor: (!audioCalibration || !timingCalibration) ? 'var(--yellow)' : 'var(--border)' }}
+                          onClick={() => setCalibrationOpen(true)}
+                        >
+                          Calibrate{(audioCalibration && timingCalibration) ? ' ✓' : ' (recommended)'}
+                        </button>
+                        {(!audioCalibration || !timingCalibration) && (
+                          <p style={{ fontSize: '0.73rem', color: 'var(--text-3)', textAlign: 'center', margin: 0, lineHeight: 1.5 }}>
+                            Calibration improves onset detection and timing accuracy.
+                          </p>
+                        )}
                       </div>
                     </>
                   )}
@@ -1259,6 +1295,14 @@ export default function App() {
             onClose={() => setMicSetupOpen(false)}
             selectedDeviceId={selectedDeviceId}
             onDeviceChange={setSelectedDeviceId}
+          />
+
+          <CalibrationModal
+            isOpen={calibrationOpen}
+            bpm={bpm}
+            deviceId={selectedDeviceId}
+            onComplete={handleCalibrationComplete}
+            onClose={() => setCalibrationOpen(false)}
           />
 
           <GuestLimitModal
