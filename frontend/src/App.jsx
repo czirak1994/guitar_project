@@ -773,7 +773,7 @@ export default function App() {
       }
   }
 
-    const pollChatAI = (sessionId, jwt, aiMsgId) => {
+    const pollChatAI = (sessionId, jwt, aiMsgId, noteData = {}) => {
     const startedAt = Date.now()
     const timer = setInterval(async () => {
       try {
@@ -792,7 +792,13 @@ export default function App() {
           setActiveChatSessionId(sessionId)
           if (data.ai_status === 'completed') {
             setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
-              ...m, status: 'done', ai_data: data.ai_advice, text: null,
+              ...m,
+              status: 'done',
+              ai_data: data.ai_advice,
+              text: null,
+              detected_notes: noteData.detected_notes || [],
+              duration_s: noteData.duration_s || 0,
+              note_bpm: noteData.bpm || 120,
             } : m))
             // Progressive disclosure: unlock full layout after first successful AI result
             if (!hasEverRecorded) {
@@ -871,9 +877,16 @@ export default function App() {
           bpm,
         })
 
+        // Stash per-note data for the timeline (keyed by aiMsgId)
+        const noteData = {
+          detected_notes: data.detected_notes || [],
+          duration_s: data.duration_s || 0,
+          bpm: data.bpm || bpm,
+        }
+
         if (data.status === 'processing_ai' || data.status === 'completed') {
           // 'completed' = silent audio: backend saved AIFeedback synchronously, poll will return immediately
-          pollChatAI(data.session_id, jwt, aiMsgId)
+          pollChatAI(data.session_id, jwt, aiMsgId, noteData)
         } else {
           inFlightRef.current = false
           setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {

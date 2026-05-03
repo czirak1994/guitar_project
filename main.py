@@ -27,7 +27,7 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
     from dsp.pitch import yin_pitch_track
     from dsp.onset import detect_onsets
     from dsp.amplitude import amplitude_envelope, rms_amplitude, rms_to_db
-    from dsp.note_utils import freq_to_note_string
+    from dsp.note_utils import freq_to_note_string, freq_to_note
     from analysis.timing import TimingAnalyzer
     from analysis.accuracy import PitchAccuracyAnalyzer
     from analysis.error_detection import ErrorDetector
@@ -81,13 +81,15 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
                 best_dt = dt
                 best = pf
         if best and best_dt < 0.1:  # within 100ms
-            note_str = freq_to_note_string(best["freq_hz"], config.reference_pitch_hz)
+            note_name, octave, cents = freq_to_note(best["freq_hz"], config.reference_pitch_hz)
+            note_str = f"{note_name}{octave}"
             detected_notes.append({
-                "time_s": onset_time,
-                "freq_hz": best["freq_hz"],
-                "confidence": best["confidence"],
+                "time_s": round(onset_time, 3),
+                "freq_hz": round(best["freq_hz"], 2),
+                "confidence": round(best["confidence"], 3),
                 "note": note_str,
-                "onset_strength": onset["strength"],
+                "cents": round(cents, 1),
+                "onset_strength": round(onset["strength"], 3),
             })
 
     print(f"  Matched {len(detected_notes)} notes to onsets")
@@ -143,6 +145,9 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
     )
     
     report_dict = report.to_dict()
+    # Inject per-note data and duration for the frontend timeline
+    report_dict["detected_notes"] = detected_notes
+    report_dict["duration_s"] = round(len(signal) / sr, 3)
 
     from feedback.ai_coach import AICoach
     if run_ai:

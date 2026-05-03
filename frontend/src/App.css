@@ -1294,3 +1294,120 @@ input[type="range"] {
 .fg-dot--yellow { background: #eab308; }
 .fg-dot--red    { background: #ef4444; }
 
+/* ── PlaybackTimeline ────────────────────────────── */
+.ptl-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ptl-canvas-container {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.ptl-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.ptl-no-data,
+.ptl-no-audio-banner,
+.ptl-loading {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--text-3);
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ptl-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ptl-play-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: rgba(245, 166, 35, 0.1);
+  color: var(--accent);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+.ptl-play-btn:hover:not(:disabled) {
+  background: rgba(245, 166, 35, 0.22);
+  transform: scale(1.08);
+}
+.ptl-play-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ptl-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+.ptl-time-sep { color: var(--text-3); margin: 0 1px; font-family: monospace; }
+.ptl-time-total {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+.ptl-seek-hint {
+  font-size: 0.66rem;
+  color: var(--text-3);
+  margin-left: 4px;
+}
+
+.ptl-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 0.66rem;
+  color: var(--text-3);
+}
+.ptl-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ptl-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ptl-dot--g { background: #22c55e; }
+.ptl-dot--y { background: #eab308; }
+.ptl-dot--r { background: #ef4444; }
+
+.ptl-bpm-label {
+  font-size: 0.64rem;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.3px;
+}

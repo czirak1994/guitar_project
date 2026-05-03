@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom'
 import axios from 'axios'
 import YouTube from 'react-youtube'
 import PerformanceChart from '../PerformanceChart'
-import FeedbackGrid from './FeedbackGrid'
+import PlaybackTimeline from './PlaybackTimeline'
 
 export function SectionTooltip({ text }) {
   const [visible, setVisible] = useState(false)
@@ -501,15 +501,14 @@ export function AIChatBubble({ message, dspMetrics, audioUrl }) {
       }}>
         {d ? (
           <>
-            {/* 1. BEAT GRID — first and most prominent */}
-            {dspMetrics && (
+            {/* 1. PLAYBACK TIMELINE — primary feedback, always first */}
+            {(dspMetrics || message.detected_notes?.length > 0) && (
               <div style={{ marginBottom: 14 }}>
-                <FeedbackGrid
-                  onTimeRatio={dspMetrics.on_time_ratio}
-                  accuracyPct={dspMetrics.accuracy_pct}
-                  timingErrorMs={dspMetrics.timing_error_ms}
+                <PlaybackTimeline
                   audioUrl={audioUrl}
-                  beatCount={8}
+                  bpm={message.note_bpm || 120}
+                  detectedNotes={message.detected_notes || []}
+                  durationSec={message.duration_s || 10}
                 />
               </div>
             )}
