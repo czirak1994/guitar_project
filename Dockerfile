@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python packages
 COPY requirements.txt .
+# Install numpy first so its C headers are available for aubio compilation
+RUN pip install --no-cache-dir numpy
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all backend source code
