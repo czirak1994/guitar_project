@@ -36,7 +36,8 @@ const HOP_SIZE         = 512   // ~12 ms step
 const RMS_THRESHOLD    = 0.01  // below this = silence
 const CLARITY_THRESH   = 0.85  // pitchy confidence; guitar fundamental is reliable at 0.85+
 const MIN_NOTE_GAP_MS  = 80    // minimum time between successive notes
-const ONSET_RATIO      = 1.5   // RMS must be ONSET_RATIO × threshold when risingconst SAME_PITCH_SEMI  = 1     // ± semitones for same-pitch dedup
+const ONSET_RATIO      = 1.5   // RMS must be ONSET_RATIO × threshold when rising
+const SAME_PITCH_SEMI  = 1     // ± semitones for same-pitch dedup
 const SAME_PITCH_MS    = 100   // max gap for same-pitch dedup
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
