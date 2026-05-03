@@ -592,7 +592,7 @@ export function AIChatBubble({ message, dspMetrics, audioUrl }) {
 }
 
 // ── ConversationalChat ────────────────────────────────────────────────────────
-export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onRecord, onDiscardAudio, onSend, panelEverOpened, onExpandPanel, latestMetrics }) {
+export function ConversationalChat({ messages, phase, elapsed, pendingAudio, beat, onRecord, onDiscardAudio, onSend, panelEverOpened, onExpandPanel, latestMetrics }) {
   const [text, setText] = useState('')
   const bottomRef = useRef(null)
 
@@ -727,7 +727,17 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
         {isRecording && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.82rem', color: 'var(--red)' }}>
             <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulse 1s ease-in-out infinite' }} />
-            Recording · {elapsed.toFixed(1)}s — click stop when done
+            Recording · {elapsed.toFixed(1)}s
+            <span style={{ display: 'flex', gap: 4, marginLeft: 4 }}>
+              {[0, 1, 2, 3].map(i => (
+                <span key={i} style={{
+                  display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                  background: beat === i ? (i === 0 ? 'var(--accent)' : 'rgba(245,166,35,0.7)') : 'rgba(245,166,35,0.18)',
+                  transition: 'background 0.05s',
+                }} />
+              ))}
+            </span>
+            <span style={{ color: 'var(--text-3)', marginLeft: 4 }}>— click stop when done</span>
           </div>
         )}
 

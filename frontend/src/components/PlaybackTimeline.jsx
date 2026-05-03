@@ -359,9 +359,13 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
         setTotalSec(buf.duration)
         setLoaded(true)
       } catch (e) {
-        console.warn('[PlaybackTimeline] decode failed:', e.message)
         if (tmpAc) { try { tmpAc.close() } catch {} }
-        if (!cancelled) setDecodeError(true)
+        if (!cancelled) {
+          // 404 = audio file not on disk any more — show friendly banner, not error
+          if (e.message && e.message.includes('HTTP 404')) setNoAudio(true)
+          else setDecodeError(true)
+        }
+        console.warn('[PlaybackTimeline] decode failed:', e.message)
       }
       if (!cancelled) setDecoding(false)
     })()
