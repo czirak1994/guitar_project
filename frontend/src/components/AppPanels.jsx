@@ -501,8 +501,8 @@ export function AIChatBubble({ message, dspMetrics, audioUrl }) {
       }}>
         {d ? (
           <>
-            {/* 1. PLAYBACK TIMELINE — primary feedback, always first */}
-            {(dspMetrics || message.detected_notes?.length > 0) && (
+            {/* 1. PLAYBACK TIMELINE — show whenever we have audio or notes */}
+            {(audioUrl || dspMetrics || message.detected_notes?.length > 0) && (
               <div style={{ marginBottom: 14 }}>
                 <PlaybackTimeline
                   audioUrl={audioUrl}
@@ -677,7 +677,7 @@ export function ConversationalChat({ messages, phase, elapsed, pendingAudio, onR
               key={m.id || i}
               message={m}
               dspMetrics={m.status === 'done' && m.ai_data ? latestMetrics : null}
-              audioUrl={m.status === 'done' && m.ai_data ? (messages[i - 1]?.audio_url || null) : null}
+              audioUrl={m.status === 'done' && m.ai_data ? (m.audio_url || messages[i - 1]?.audio_url || null) : null}
             />
           )
         ))}

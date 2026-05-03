@@ -512,7 +512,7 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
   return (
     <div className="hero-screen">
       <h1 className="hero-headline">Play something.<br />I'll tell you what to fix.</h1>
-      <p className="hero-sub">No setup needed.</p>
+      <p className="hero-sub">Try it instantly — no signup needed.</p>
 
       {isFirstVisit && (
         <div className="hero-first-hint">
@@ -836,7 +836,7 @@ export default function App() {
     }
 
     setChatMessages(prev => [...prev, { id: userMsgId, role: 'user', text: text || null, audio_url: audioUrl }])
-    setChatMessages(prev => [...prev, { id: aiMsgId, role: 'assistant', status: 'analyzing', text: null, ai_data: null }])
+    setChatMessages(prev => [...prev, { id: aiMsgId, role: 'assistant', status: 'analyzing', text: null, ai_data: null, audio_url: audioUrl }])
 
     try {
       const jwt = await getToken()
@@ -960,7 +960,7 @@ export default function App() {
           <header className="app-header">
             <div className="app-title">ToneSense</div>
             <div className="header-right">
-              {usage && usage.remaining_today !== null && usage.remaining_today !== undefined && (
+              {usage && usage.remaining_today !== null && usage.remaining_today !== undefined && hasEverRecorded && (
                 <span
                   className="usage-pill"
                   style={{

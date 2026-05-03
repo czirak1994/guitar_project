@@ -13,6 +13,14 @@
  */
 import { useRef, useEffect, useState, useCallback } from 'react'
 
+// Visual severity: off-tune notes are visually dominant, good notes are subtle
+function noteSeverity(cents) {
+  const a = Math.abs(cents ?? 60)
+  if (a < 18) return 'good'
+  if (a < 38) return 'close'
+  return 'off'
+}
+
 const H = 110   // canvas height px (intrinsic)
 
 const C = {
@@ -24,10 +32,8 @@ const C = {
 }
 
 function noteColor(cents) {
-  const a = Math.abs(cents ?? 60)
-  if (a < 18) return C.good
-  if (a < 38) return C.close
-  return C.off
+  const sev = noteSeverity(cents)
+  return C[sev]
 }
 
 // ── RMS envelope — much better than min/max ───────────────────────────────────
@@ -66,17 +72,15 @@ function buildOffscreen(W, totalSec, audioBuffer, bpm, detectedNotes) {
   const midY     = H / 2
   const pxPerSec = W / totalSec
 
-  // ── Waveform ───────────────────────────────────────────────────────────────
+  // ── Waveform — kept intentionally dim so error markers pop ─────────────────
   if (audioBuffer) {
     const rms = buildRMS(audioBuffer.getChannelData(0), W)
 
-    // Filled gradient envelope (symmetric)
+    // Low-opacity gradient — acts as background context only
     const grad = oc.createLinearGradient(0, 0, 0, H)
-    grad.addColorStop(0,    'rgba(245,166,35,0.55)')
-    grad.addColorStop(0.35, 'rgba(245,166,35,0.75)')
-    grad.addColorStop(0.5,  'rgba(245,166,35,0.85)')
-    grad.addColorStop(0.65, 'rgba(245,166,35,0.75)')
-    grad.addColorStop(1,    'rgba(245,166,35,0.55)')
+    grad.addColorStop(0,    'rgba(245,166,35,0.15)')
+    grad.addColorStop(0.5,  'rgba(245,166,35,0.28)')
+    grad.addColorStop(1,    'rgba(245,166,35,0.15)')
 
     oc.fillStyle = grad
     oc.beginPath()
@@ -84,17 +88,17 @@ function buildOffscreen(W, totalSec, audioBuffer, bpm, detectedNotes) {
 
     // Forward pass — top edge
     for (let x = 0; x < W; x++) {
-      oc.lineTo(x, midY - rms[x] * midY * 0.82)
+      oc.lineTo(x, midY - rms[x] * midY * 0.65)
     }
     // Backward pass — bottom edge (mirror)
     for (let x = W - 1; x >= 0; x--) {
-      oc.lineTo(x, midY + rms[x] * midY * 0.82)
+      oc.lineTo(x, midY + rms[x] * midY * 0.65)
     }
     oc.closePath()
     oc.fill()
 
-    // Thin bright centre-line
-    oc.strokeStyle = 'rgba(245,166,35,0.15)'
+    // Thin centre-line
+    oc.strokeStyle = 'rgba(245,166,35,0.08)'
     oc.lineWidth   = 0.5
     oc.beginPath()
     oc.moveTo(0, midY)
@@ -102,7 +106,7 @@ function buildOffscreen(W, totalSec, audioBuffer, bpm, detectedNotes) {
     oc.stroke()
   }
 
-  // ── Beat grid ─────────────────────────────────────────────────────────────
+  // ── Beat grid — measure lines only to reduce clutter ────────────────────────
   const beatSec  = 60 / bpm
   const numBeats = Math.ceil(totalSec / beatSec) + 1
   oc.font = '9px JetBrains Mono, monospace'
@@ -110,62 +114,84 @@ function buildOffscreen(W, totalSec, audioBuffer, bpm, detectedNotes) {
   for (let i = 0; i <= numBeats; i++) {
     const x = i * beatSec * pxPerSec
     if (x > W) break
-    const isMeasure = i % 4 === 0
+    if (i % 4 !== 0) continue  // skip individual beat lines
 
-    oc.strokeStyle = isMeasure ? 'rgba(245,166,35,0.30)' : 'rgba(245,166,35,0.10)'
-    oc.lineWidth   = isMeasure ? 1.2 : 0.6
+    oc.strokeStyle = 'rgba(245,166,35,0.14)'
+    oc.lineWidth   = 1
     oc.beginPath()
     oc.moveTo(x, 0)
     oc.lineTo(x, H)
     oc.stroke()
-
-    if (isMeasure && i > 0) {
-      oc.fillStyle = 'rgba(245,166,35,0.5)'
-      oc.fillText(`${i / 4 + 1}`, x + 3, 11)
-    }
   }
 
-  // ── Note markers ──────────────────────────────────────────────────────────
-  detectedNotes.forEach(note => {
+  // ── Note markers — errors are visually dominant, correct notes are subtle ──
+  // Draw good/close notes first so error markers render on top
+  const sorted = [...detectedNotes].sort((a, b) => {
+    const order = { good: 0, close: 1, off: 2 }
+    return order[noteSeverity(a.cents)] - order[noteSeverity(b.cents)]
+  })
+
+  sorted.forEach(note => {
     const x   = note.time_s * pxPerSec
     const col = noteColor(note.cents)
+    const sev = noteSeverity(note.cents)
 
-    // Glow halo
-    oc.globalAlpha = 0.18
-    oc.fillStyle   = col
-    oc.beginPath()
-    oc.arc(x, midY, 12, 0, Math.PI * 2)
-    oc.fill()
+    if (sev === 'off') {
+      // Large glow halo for errors — immediately visible
+      oc.globalAlpha = 0.30
+      oc.fillStyle   = col
+      oc.beginPath()
+      oc.arc(x, midY, 20, 0, Math.PI * 2)
+      oc.fill()
 
-    // Stem line — full height, thin
-    oc.globalAlpha  = 0.5
-    oc.strokeStyle  = col
-    oc.lineWidth    = 1
-    oc.beginPath()
-    oc.moveTo(x, 8)
-    oc.lineTo(x, H - 8)
-    oc.stroke()
+      // Full-height stem
+      oc.globalAlpha  = 0.65
+      oc.strokeStyle  = col
+      oc.lineWidth    = 1.5
+      oc.beginPath()
+      oc.moveTo(x, 0)
+      oc.lineTo(x, H)
+      oc.stroke()
 
-    // Dot cap
-    oc.globalAlpha = 1
-    oc.fillStyle   = col
-    oc.shadowColor  = col
-    oc.shadowBlur   = 6
-    oc.beginPath()
-    oc.arc(x, 13, 5, 0, Math.PI * 2)
-    oc.fill()
-    oc.shadowBlur   = 0
+      // Large bright dot
+      oc.globalAlpha  = 1
+      oc.fillStyle    = col
+      oc.shadowColor  = col
+      oc.shadowBlur   = 14
+      oc.beginPath()
+      oc.arc(x, 12, 7, 0, Math.PI * 2)
+      oc.fill()
+      oc.shadowBlur   = 0
+    } else if (sev === 'close') {
+      // Medium halo
+      oc.globalAlpha = 0.15
+      oc.fillStyle   = col
+      oc.beginPath()
+      oc.arc(x, midY, 10, 0, Math.PI * 2)
+      oc.fill()
 
-    // Note name
-    if (note.note) {
-      oc.fillStyle   = 'rgba(255,255,255,0.92)'
-      oc.globalAlpha = 0.95
-      oc.font        = 'bold 8px JetBrains Mono, monospace'
-      const lx = Math.max(2, Math.min(x - 6, W - 26))
-      oc.fillText(note.note, lx, 28)
+      // Small dot
+      oc.globalAlpha  = 0.8
+      oc.fillStyle    = col
+      oc.shadowColor  = col
+      oc.shadowBlur   = 5
+      oc.beginPath()
+      oc.arc(x, 12, 4.5, 0, Math.PI * 2)
+      oc.fill()
+      oc.shadowBlur   = 0
+    } else {
+      // 'good' — tiny, barely noticeable
+      oc.globalAlpha  = 0.55
+      oc.fillStyle    = col
+      oc.shadowColor  = col
+      oc.shadowBlur   = 3
+      oc.beginPath()
+      oc.arc(x, 12, 3, 0, Math.PI * 2)
+      oc.fill()
+      oc.shadowBlur   = 0
     }
+
     oc.globalAlpha = 1
-    oc.font        = '9px JetBrains Mono, monospace'
   })
 
   return off
@@ -173,22 +199,24 @@ function buildOffscreen(W, totalSec, audioBuffer, bpm, detectedNotes) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = [], durationSec = 10 }) {
-  const canvasRef    = useRef(null)
-  const offscreenRef = useRef(null)
-  const ctxRef       = useRef(null)   // AudioContext (for playback)
-  const sourceRef    = useRef(null)
-  const bufferRef    = useRef(null)
-  const rafRef       = useRef(null)
-  const startWallRef = useRef(null)
-  const seekRef      = useRef(0)
-  const totalSecRef  = useRef(durationSec || 10)
+  const canvasRef      = useRef(null)
+  const offscreenRef   = useRef(null)
+  const ctxRef         = useRef(null)   // AudioContext (for playback)
+  const sourceRef      = useRef(null)
+  const bufferRef      = useRef(null)
+  const rafRef         = useRef(null)
+  const startWallRef   = useRef(null)
+  const seekRef        = useRef(0)
+  const totalSecRef    = useRef(durationSec || 10)
+  const snippetTimerRef = useRef(null)  // for marker-click snippet stop
 
-  const [isPlaying,  setIsPlaying]  = useState(false)
-  const [currentSec, setCurrentSec] = useState(0)
-  const [totalSec,   setTotalSec]   = useState(durationSec || 10)
-  const [loaded,     setLoaded]     = useState(false)
-  const [decoding,   setDecoding]   = useState(false)
-  const [noAudio,    setNoAudio]    = useState(!audioUrl)
+  const [isPlaying,   setIsPlaying]  = useState(false)
+  const [currentSec,  setCurrentSec] = useState(0)
+  const [totalSec,    setTotalSec]   = useState(durationSec || 10)
+  const [loaded,      setLoaded]     = useState(false)
+  const [decoding,    setDecoding]   = useState(false)
+  const [decodeError, setDecodeError] = useState(false)
+  const [noAudio,     setNoAudio]    = useState(!audioUrl)
 
   // Keep ref in sync for RAF closure
   useEffect(() => { totalSecRef.current = totalSec }, [totalSec])
@@ -199,26 +227,45 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     setNoAudio(false)
     setLoaded(false)
     setDecoding(true)
+    setDecodeError(false)
     let cancelled = false
+    let localAc = null  // track in closure so cleanup can close it if needed
 
     ;(async () => {
       try {
-        const ac  = new (window.AudioContext || window.webkitAudioContext)()
+        localAc = new (window.AudioContext || window.webkitAudioContext)()
         const res = await fetch(audioUrl)
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching audio blob`)
         const raw = await res.arrayBuffer()
-        const buf = await ac.decodeAudioData(raw)
-        if (cancelled) { ac.close(); return }
+        const buf = await localAc.decodeAudioData(raw)
+        if (cancelled) { localAc.close(); return }
+        // Close previous AC before adopting the new one
+        if (ctxRef.current && ctxRef.current !== localAc && ctxRef.current.state !== 'closed') {
+          try { ctxRef.current.close() } catch {}
+        }
         bufferRef.current = buf
-        ctxRef.current    = ac
+        ctxRef.current    = localAc
+        console.debug('[PlaybackTimeline] decoded OK, duration:', buf.duration.toFixed(2), 's')
         setTotalSec(buf.duration)
         setLoaded(true)
       } catch (e) {
         console.warn('[PlaybackTimeline] Audio decode failed:', e.message)
+        if (!cancelled) setDecodeError(true)
+        // Close the AC if decode failed and it was never adopted
+        if (localAc && ctxRef.current !== localAc && localAc.state !== 'closed') {
+          try { localAc.close() } catch {}
+        }
       }
       if (!cancelled) setDecoding(false)
     })()
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      // Close localAc only if it was never successfully adopted as ctxRef.current
+      if (localAc && ctxRef.current !== localAc && localAc.state !== 'closed') {
+        localAc.close().catch(() => {})
+      }
+    }
   }, [audioUrl])
 
   // ── Build offscreen whenever static data changes ────────────────────────────
@@ -315,7 +362,8 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
   // ── Play ─────────────────────────────────────────────────────────────────────
   const play = useCallback(async (fromSec) => {
     if (!bufferRef.current) return
-    // FIX: declare 'from' with let
+    // Clear any running snippet timer
+    if (snippetTimerRef.current) { clearTimeout(snippetTimerRef.current); snippetTimerRef.current = null }
     let from = fromSec !== undefined ? fromSec : seekRef.current
 
     let ac = ctxRef.current
@@ -353,6 +401,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
 
   // ── Pause ────────────────────────────────────────────────────────────────────
   const pause = useCallback(() => {
+    if (snippetTimerRef.current) { clearTimeout(snippetTimerRef.current); snippetTimerRef.current = null }
     cancelAnimationFrame(rafRef.current)
     seekRef.current = currentSec
     if (sourceRef.current) {
@@ -361,26 +410,71 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
     setIsPlaying(false)
   }, [currentSec])
 
-  // ── Click-to-seek ────────────────────────────────────────────────────────────
+  // ── Hover — pointer cursor near markers ─────────────────────────────────────
+  const handleCanvasMouseMove = useCallback((e) => {
+    if (!detectedNotes.length) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect       = canvas.getBoundingClientRect()
+    const ratio      = (e.clientX - rect.left) / rect.width
+    const hoverSec   = ratio * totalSecRef.current
+    const pxPerSec   = canvas.width / totalSecRef.current
+    const hitRadiusSec = 20 / pxPerSec
+    const nearMarker = detectedNotes.some(n => Math.abs(n.time_s - hoverSec) < hitRadiusSec)
+    canvas.style.cursor = nearMarker ? 'pointer' : 'crosshair'
+  }, [detectedNotes])
+
+  // ── Click-to-seek / marker-snippet ──────────────────────────────────────────
   const handleCanvasClick = useCallback((e) => {
-    const rect   = canvasRef.current.getBoundingClientRect()
-    const ratio  = (e.clientX - rect.left) / rect.width
-    const seekSec = ratio * totalSecRef.current
-    seekRef.current = seekSec
-    setCurrentSec(seekSec)
-    if (isPlaying) play(seekSec)
-    else drawComposite(seekSec)
-  }, [isPlaying, play, drawComposite])
+    const rect    = canvasRef.current.getBoundingClientRect()
+    const canvasW = canvasRef.current.width
+    const ratio   = (e.clientX - rect.left) / rect.width
+    const clickSec = ratio * totalSecRef.current
+
+    // Find nearest note marker within ~20px
+    const pxPerSec     = canvasW / totalSecRef.current
+    const hitRadiusSec = 20 / pxPerSec
+    let nearest = null, minDist = Infinity
+    for (const note of detectedNotes) {
+      const dist = Math.abs(note.time_s - clickSec)
+      if (dist < hitRadiusSec && dist < minDist) { minDist = dist; nearest = note }
+    }
+
+    if (nearest && bufferRef.current) {
+      // Play a 2-second snippet starting 0.3 s before the marker
+      const from = Math.max(0, nearest.time_s - 0.3)
+      if (snippetTimerRef.current) clearTimeout(snippetTimerRef.current)
+      play(from)
+      snippetTimerRef.current = setTimeout(() => {
+        snippetTimerRef.current = null
+        cancelAnimationFrame(rafRef.current)
+        if (sourceRef.current) { try { sourceRef.current.onended = null; sourceRef.current.stop() } catch {} }
+        setIsPlaying(false)
+        seekRef.current = nearest.time_s
+        setCurrentSec(nearest.time_s)
+        drawComposite(nearest.time_s)
+      }, 2000)
+    } else {
+      // Normal seek
+      if (snippetTimerRef.current) { clearTimeout(snippetTimerRef.current); snippetTimerRef.current = null }
+      seekRef.current = clickSec
+      setCurrentSec(clickSec)
+      if (isPlaying) play(clickSec)
+      else drawComposite(clickSec)
+    }
+  }, [isPlaying, play, drawComposite, detectedNotes])
 
   // ── Cleanup ──────────────────────────────────────────────────────────────────
   useEffect(() => () => {
     cancelAnimationFrame(rafRef.current)
+    if (snippetTimerRef.current) clearTimeout(snippetTimerRef.current)
     if (sourceRef.current) try { sourceRef.current.stop() } catch {}
   }, [])
 
   const fmt     = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
   const canPlay  = loaded && !noAudio
   const hasNotes = detectedNotes.length > 0
+  const errNotes = detectedNotes.filter(n => noteSeverity(n.cents) === 'off')
 
   return (
     <div className="ptl-wrap">
@@ -393,6 +487,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
           height={H}
           className="ptl-canvas"
           onClick={canPlay || hasNotes ? handleCanvasClick : undefined}
+          onMouseMove={hasNotes ? handleCanvasMouseMove : undefined}
           style={{ cursor: canPlay ? 'crosshair' : 'default' }}
         />
         {noAudio && hasNotes && (
@@ -405,6 +500,19 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
         )}
         {decoding && (
           <div className="ptl-loading">Decoding…</div>
+        )}
+        {decodeError && (
+          <div className="ptl-loading" style={{ color: 'var(--red)' }}>Audio decode failed</div>
+        )}
+        {/* "Click to hear" microcopy near error markers */}
+        {hasNotes && canPlay && !decoding && (
+          <div style={{
+            position: 'absolute', bottom: 4, right: 8,
+            fontSize: '0.68rem', color: 'rgba(245,166,35,0.45)',
+            pointerEvents: 'none', userSelect: 'none',
+          }}>
+            {errNotes.length > 0 ? `${errNotes.length} mistake${errNotes.length > 1 ? 's' : ''} — click to hear` : 'Click to seek'}
+          </div>
         )}
       </div>
 
@@ -422,7 +530,6 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
             <span className="ptl-time">{fmt(currentSec)}</span>
             <span className="ptl-time-sep">/</span>
             <span className="ptl-time-total">{fmt(totalSec)}</span>
-            <span className="ptl-seek-hint">Click to seek</span>
           </>
         )}
 
