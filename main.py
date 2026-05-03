@@ -141,8 +141,7 @@ def _detect_notes_legacy(signal, sr, config, latency_ms: float = 0.0) -> list[di
 def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, run_ai: bool = True) -> dict:
     """Analyze a WAV file and return the feedback report as dict.
 
-    Note detection uses aubio (YIN pitch + onset detection) for accuracy.
-    Falls back to the legacy pure-numpy YIN pipeline if aubio is not installed.
+    Note detection uses librosa (pyin pitch + onset detection).
     """
     import soundfile as sf
     from dsp.amplitude import amplitude_envelope, rms_amplitude, rms_to_db
@@ -162,7 +161,7 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
 
     print(f"  Duration: {len(signal)/sr:.2f}s, Sample rate: {sr} Hz, Samples: {len(signal)}")
 
-    # --- Note detection (aubio) ---
+    # --- Note detection (librosa pyin + onset) ---
     scale_notes = None
     if ai_context:
         raw_scale = ai_context.get('scale_or_key', '') or ''
@@ -171,21 +170,16 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
 
     latency_ms = config.audio.latency_offset_ms
 
-    try:
-        from dsp.aubio_notes import detect_notes_aubio
-        print("Running note detection (aubio YIN + onset)...")
-        detected_notes = detect_notes_aubio(
-            signal, sr,
-            bpm=config.analysis.bpm,
-            scale_notes=scale_notes,
-            a4=config.reference_pitch_hz,
-            latency_ms=latency_ms,
-        )
-        print(f"  Detected {len(detected_notes)} notes")
-    except RuntimeError as exc:
-        # aubio not installed — fall back to legacy pipeline
-        print(f"  [WARNING] {exc} — falling back to legacy YIN+spectral-flux")
-        detected_notes = _detect_notes_legacy(signal, sr, config, latency_ms)
+    from dsp.librosa_notes import detect_notes
+    print("Running note detection (librosa pyin + onset)...")
+    detected_notes = detect_notes(
+        signal, sr,
+        bpm=config.analysis.bpm,
+        scale_notes=scale_notes,
+        a4=config.reference_pitch_hz,
+        latency_ms=latency_ms,
+    )
+    print(f"  Detected {len(detected_notes)} notes")
 
     # --- Amplitude ---
     print("Computing amplitude...")
@@ -202,8 +196,7 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
         onset_times, config.analysis.bpm, auto_align=True
     )
 
-    # Sync beat_offset_ms / beat_time_s from the timing report so aubio and
-    # legacy paths both produce identical fields.
+    # Sync beat_offset_ms / beat_time_s from the timing report.
     for note, tr in zip(detected_notes, timing_report.results):
         note["beat_offset_ms"] = round(tr.deviation_ms, 1)
         note["beat_time_s"]    = round(tr.expected_time_s, 3)
