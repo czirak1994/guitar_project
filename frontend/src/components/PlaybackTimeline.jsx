@@ -57,30 +57,6 @@ function timingSeverity(offsetMs) {
 }
 
 /**
- * Merge duplicate / ghost onsets that are closer than MIN_GAP_MS together.
- * Notes MUST be pre-sorted by time_s (backend already does this).
- * When two notes are within the gap window, keep the one with higher confidence.
- */
-function mergeNotes(notes, minGapMs = 100) {
-  if (!notes.length) return notes
-  const sorted = [...notes].sort((a, b) => a.time_s - b.time_s)
-  const out = [{ ...sorted[0] }]
-  for (let i = 1; i < sorted.length; i++) {
-    const last  = out[out.length - 1]
-    const gapMs = (sorted[i].time_s - last.time_s) * 1000
-    if (gapMs <= minGapMs) {
-      // Keep whichever has higher confidence; fall back to later note if equal
-      if (sorted[i].confidence > last.confidence) {
-        out[out.length - 1] = { ...sorted[i] }
-      }
-    } else {
-      out.push({ ...sorted[i] })
-    }
-  }
-  return out
-}
-
-/**
  * From a merged note list, return only the notes worth displaying:
  *   – timing error > 20 ms (close or off)  ← player is noticeably off-beat
  *   – pitch unknown (freq_hz === 0)         ← something played, can't tell what
@@ -322,8 +298,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
   const phaseS  = detectedNotes.length ? findBeatPhase(detectedNotes, beatSec) : 0
 
   // Merge closely-spaced ghost onsets, then filter to only problem notes (≤20ms off)
-  const mergedNotes  = mergeNotes(detectedNotes)
-  const visibleNotes = computeVisibleNotes(mergedNotes, beatSec, phaseS)
+  const visibleNotes = computeVisibleNotes(detectedNotes, beatSec, phaseS)
 
   // ── Decode audio ──────────────────────────────────────────────────────────
   // KEY: we decode with a temporary AC that is IMMEDIATELY closed after decode.

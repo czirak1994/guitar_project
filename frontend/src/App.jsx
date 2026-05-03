@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
-import { detectNotes } from './utils/detectNotes'
 import { loadCalibration, saveInputCalibration, saveTimingCalibration } from './utils/calibrate'
 import CalibrationModal from './components/CalibrationModal'
 import './App.css'
@@ -811,19 +810,10 @@ export default function App() {
                 offset += a.length
             }
 
-            // ── Frontend DSP note detection ────────────────────────────────
-            // Run before encoding so we have the raw Float32 samples at hand.
-            // Results are attached to pendingAudio and later sent to the backend.
-            const { notes: frontendNotes, duration: frontendDuration } =
-              detectNotes(allSamples, audioCtx.sampleRate, bpm, {
-                thresholdRms: audioCalibration?.thresholdRms,
-                avgOffsetMs:  timingCalibration?.avgOffsetMs,
-              })
-
             const wavBlob = encodeWAV(allSamples, audioCtx.sampleRate)
             const wavUrl = URL.createObjectURL(wavBlob)
 
-            setPendingAudio({ blob: wavBlob, url: wavUrl, detectedNotes: frontendNotes, duration: frontendDuration })
+            setPendingAudio({ blob: wavBlob, url: wavUrl, duration: allSamples.length / audioCtx.sampleRate })
             setPhase('review')
             inFlightRef.current = false
             audioCtx.close().catch(()=>{})
@@ -921,15 +911,6 @@ export default function App() {
         formData.append('scale_or_key', scaleKey)
         formData.append('rhythm_info', rhythmInfo)
 
-        // ── Include frontend-detected notes so the backend stores them ────────
-        // The backend will use these instead of running its own detection,
-        // and return them via /api/session/<id> for timeline persistence.
-        const frontendNotes    = audio?.detectedNotes || []
-        const frontendDuration = audio?.duration       || 0
-        if (frontendNotes.length) {
-          formData.append('frontend_notes', JSON.stringify(frontendNotes))
-        }
-
         const { data } = await axios.post('/api/analyze', formData, {
           headers: authHeaders(jwt),
         })
@@ -952,8 +933,8 @@ export default function App() {
         // Frontend-detected notes take priority — they're already available
         // without waiting for the AI poll to finish.
         const noteData = {
-          detected_notes: frontendNotes.length ? frontendNotes : (data.detected_notes || []),
-          duration_s: data.duration_s || frontendDuration || 0,
+          detected_notes: data.detected_notes || [],
+          duration_s: data.duration_s || 0,
           bpm: data.bpm || bpm,
         }
 

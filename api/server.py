@@ -339,31 +339,9 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             new_session.problem = user_problem
             new_session.focus = focus
             new_session.style = style
-            # Store detected notes so they survive page refresh.
-            # Frontend sends its own YIN-detected notes — always prefer those.
-            # When frontend notes are present, also recompute timing metrics from
-            # them so the stats widget (accuracy_pct, timing_error_ms, on_time_ratio)
-            # matches the timeline rather than the backend's separate detection run.
-            frontend_notes_raw = request.form.get('frontend_notes')
-            if frontend_notes_raw:
-                try:
-                    detected_notes = json.loads(frontend_notes_raw)
-                    print(f"[Notes] Using {len(detected_notes)} frontend-detected notes")
-                    if detected_notes:
-                        from analysis.timing import TimingAnalyzer
-                        onset_times = [n['time_s'] for n in detected_notes]
-                        _ta = TimingAnalyzer(tolerance_ms=config.analysis.timing_tolerance_ms)
-                        _tr = _ta.analyze_vs_metronome(onset_times, config.analysis.bpm, auto_align=True)
-                        report['timing_error_ms']    = round(_tr.mean_deviation_ms, 1)
-                        report['on_time_ratio']      = round(_tr.on_time_ratio, 3)
-                        report['timing_consistency'] = round(_tr.consistency_score, 1)
-                        print(f"[Notes] Recomputed timing from frontend notes: "
-                              f"err={report['timing_error_ms']}ms on_time={report['on_time_ratio']:.1%}")
-                except Exception as e:
-                    print(f"[Notes] Frontend notes parse error: {e}")
-                    detected_notes = report.get('detected_notes', [])
-            else:
-                detected_notes = report.get('detected_notes', [])
+            # Backend is the sole source of truth for note detection.
+            # Frontend no longer sends frontend_notes — all analysis happens here.
+            detected_notes = report.get('detected_notes', [])
             new_session.detected_notes_json = json.dumps(detected_notes)
             db.session.add(new_session)
             db.session.flush() # get ID
@@ -460,7 +438,6 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             # Start Async AI only if not silent
             if not is_silent:
                 app_clone = app
-                # backing_track_url is now the raw YouTube URL from the frontend
                 t = threading.Thread(target=run_async_ai, args=(app_clone, new_session.id, str(tmp), config, report, ai_context, backing_track_url))
                 t.daemon = True
                 t.start()
@@ -475,6 +452,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
                 "bpm": config.analysis.bpm,
                 "duration_s": report.get("duration_s", 0),
                 "detected_notes": detected_notes,
+                "timing_stats": report.get("timing_stats"),
+                "pitch_stats": report.get("pitch_stats"),
                 "audio_url": f"/api/session/{new_session.id}/audio" if new_session.audio_file else None,
                 "streak_days": learning_state.streak_days if learning_state else None,
                 "current_focus": learning_state.current_focus if learning_state else None,
