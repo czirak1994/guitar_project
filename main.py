@@ -170,8 +170,8 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
 
     latency_ms = config.audio.latency_offset_ms
 
-    from dsp.librosa_notes import detect_notes
-    print("Running note detection (librosa pyin + onset)...")
+    from dsp.basic_pitch_notes import detect_notes
+    print("Running note detection (basic-pitch neural network)...")
     detected_notes = detect_notes(
         signal, sr,
         bpm=config.analysis.bpm,

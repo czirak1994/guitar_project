@@ -15,15 +15,15 @@ RUN cd frontend && npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install system dependencies needed for audio processing
+# Install system dependencies needed for audio processing and TensorFlow
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsndfile1 \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages — pin numpy<2.0 first so pip never resolves 2.x
+# Install Python packages
 COPY requirements.txt .
-RUN pip install --no-cache-dir "numpy>=1.24.0,<2.0" && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all backend source code
 COPY . .
