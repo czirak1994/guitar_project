@@ -639,7 +639,7 @@ export default function PlaybackTimeline({ audioUrl, bpm = 120, detectedNotes = 
       {/* Metadata */}
       <div className="ptl-bpm-label">
         {bpm} BPM
-        {hasNotes && ` · ${visibleNotes.length} of ${mergedNotes.length} notes`}
+        {hasNotes && ` · ${visibleNotes.length} of ${detectedNotes.length} notes`}
         {!canPlay && !noAudio && !decoding && !loaded && ' · loading…'}
       </div>
     </div>
