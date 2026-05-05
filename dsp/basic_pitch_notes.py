@@ -97,6 +97,73 @@ def _classify_timing(beat_offset_ms: float) -> str:
     return 'early' if beat_offset_ms < 0 else 'late'
 
 
+def _classify_note_type(duration_ms: float, beat_sec: float) -> str:
+    """Classify a note as 'short', 'normal', or 'sustained' relative to the BPM.
+
+    - short:    < one 16th note  (beat_sec / 4)  — staccato, pick click, artifact
+    - sustained: > 1.5 beats                     — held / legato note
+    - normal:   everything in between
+    """
+    beat_ms = beat_sec * 1000.0
+    if duration_ms < beat_ms * 0.25:
+        return 'short'
+    if duration_ms > beat_ms * 1.5:
+        return 'sustained'
+    return 'normal'
+
+
+def _is_harmonic(freq_a: float, freq_b: float, tolerance_cents: float = 60.0) -> bool:
+    """Return True if freq_b is a harmonic (2×/3×/4×) or sub-harmonic (1/2×) of freq_a."""
+    for ratio in (2.0, 3.0, 4.0, 0.5):
+        expected = freq_a * ratio
+        if expected <= 0:
+            continue
+        cents_diff = abs(1200.0 * math.log2(freq_b / expected))
+        if cents_diff <= tolerance_cents:
+            return True
+    return False
+
+
+def _remove_harmonic_duplicates(notes: list[dict], window_ms: float = 50.0) -> list[dict]:
+    """Remove notes that are harmonics of a stronger note starting at roughly the same time.
+
+    Two notes are considered co-onset if they start within *window_ms* of each other.
+    Among such a group, the note with the highest confidence (amplitude) is kept;
+    any other whose frequency is a harmonic/sub-harmonic of the winner is discarded.
+    """
+    if not notes:
+        return notes
+
+    # Sort by onset so we can do a single-pass group scan
+    ordered = sorted(notes, key=lambda n: n['start_ms'])
+    kept = []
+    i = 0
+    while i < len(ordered):
+        # Collect all notes co-onset with ordered[i]
+        group = [ordered[i]]
+        j = i + 1
+        while j < len(ordered) and ordered[j]['start_ms'] - ordered[i]['start_ms'] <= window_ms:
+            group.append(ordered[j])
+            j += 1
+
+        if len(group) == 1:
+            kept.append(group[0])
+        else:
+            # Winner = highest confidence in the group
+            winner = max(group, key=lambda n: n['confidence'])
+            kept.append(winner)
+            for candidate in group:
+                if candidate is winner:
+                    continue
+                if not _is_harmonic(winner['pitch_hz'], candidate['pitch_hz']):
+                    # Not a harmonic — keep it as a separate real note
+                    kept.append(candidate)
+
+        i = j
+
+    return sorted(kept, key=lambda n: n['start_ms'])
+
+
 # ── Main API ──────────────────────────────────────────────────────────────────
 
 def detect_notes(
@@ -173,6 +240,8 @@ def detect_notes(
             'beat_time_s':    beat_time_s,
             'timing':         _classify_timing(beat_offset_ms),
             'scale_status':   _scale_correctness(note_name, scale_notes),
+            'note_type':      _classify_note_type(duration_ms, beat_sec),
         })
 
-    return results
+    # Post-process: remove harmonics that basic-pitch detected as separate notes
+    return _remove_harmonic_duplicates(results)
