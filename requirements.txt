@@ -1,5 +1,5 @@
 numpy>=1.18.0,<2.0
-basic-pitch>=0.3.0
+librosa==0.10.1
 sounddevice>=0.4.6
 soundfile>=0.12.1
 flask>=3.0.0

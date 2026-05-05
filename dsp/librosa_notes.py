@@ -112,6 +112,21 @@ def _timing_label(offset_ms: float) -> str:
     return 'early' if offset_ms < 0 else 'late'
 
 
+def _classify_note_type(duration_ms: float, beat_sec: float) -> str:
+    """Classify note length relative to BPM.
+
+    - short:    < one 16th note (beat/4)  — staccato / pick artifact
+    - sustained: > 1.5 beats              — held / legato
+    - normal:   everything in between
+    """
+    beat_ms = beat_sec * 1000.0
+    if duration_ms < beat_ms * 0.25:
+        return 'short'
+    if duration_ms > beat_ms * 1.5:
+        return 'sustained'
+    return 'normal'
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def detect_notes(
@@ -250,5 +265,6 @@ def detect_notes(
         note['beat_time_s']    = beat_time_s
         note['timing']         = _timing_label(offset_ms)
         note['scale_status']   = _scale_correctness(note['note_name'], scale_notes)
+        note['note_type']      = _classify_note_type(note['duration_ms'], beat_sec)
 
     return raw_notes
