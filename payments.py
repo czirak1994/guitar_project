@@ -125,3 +125,8 @@ def stripe_webhook():
                 print(f"[Stripe] Downgraded user {user.user_id} to FREE (subscription cancelled)")
 
     return jsonify(success=True)
+
+
+@payments_bp.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook_alias():
+    return stripe_webhook()
