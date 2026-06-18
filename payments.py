@@ -21,6 +21,13 @@ def create_checkout_session():
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
 
+    # Diagnostic logging — confirm request is reaching backend and env vars are set
+    stripe_key = os.getenv("STRIPE_SECRET_KEY", "")
+    print(f"[Checkout] user_id={user_id}")
+    print(f"[Checkout] STRIPE_SECRET_KEY set={bool(stripe_key)}, prefix={stripe_key[:10] if stripe_key else 'EMPTY'}")
+    print(f"[Checkout] STRIPE_PRO_PRICE_ID={os.getenv('STRIPE_PRO_PRICE_ID', 'NOT SET')}")
+    print(f"[Checkout] FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')}")
+
     try:
         # Robust URL construction to prevent Stripe "Not a valid URL" errors
         raw_url = os.getenv("FRONTEND_URL")
@@ -35,6 +42,7 @@ def create_checkout_session():
         print(f"[Stripe] Creating session with base_url: {base_url}")
 
         # Create a new Checkout Session for the PRO plan
+        print("[Checkout] Calling stripe.checkout.Session.create()...")
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[
@@ -53,6 +61,7 @@ def create_checkout_session():
         )
         return jsonify({"url": checkout_session.url})
     except Exception as e:
+        print(f"[Stripe Error] {type(e).__name__}: {e}")
         return jsonify(error=str(e)), 500
 
 
