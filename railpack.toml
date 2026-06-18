@@ -1,0 +1,5 @@
+[build]
+cmd = "cd frontend && npm ci && npm run build"
+
+[packages]
+node = "20"
