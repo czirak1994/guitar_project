@@ -257,6 +257,15 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
             except ValueError:
                 pass
 
+        noise_floor_db = request.form.get("noise_floor_db")
+        if noise_floor_db:
+            try:
+                config.audio.calibrated_noise_floor_db = float(noise_floor_db)
+            except ValueError:
+                pass
+        else:
+            config.audio.calibrated_noise_floor_db = None
+
         f = request.files["file"]
         # In a cloud environment, use fallback to /tmp or Windows TEMP
         temp_dir = os.environ.get("TEMP", "/tmp")

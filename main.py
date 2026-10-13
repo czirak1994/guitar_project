@@ -169,15 +169,19 @@ def analyze_wav_file(filepath: str, config: AppConfig, ai_context: dict = None, 
             scale_notes = _parse_scale_notes(raw_scale)
 
     latency_ms = config.audio.latency_offset_ms
+    noise_floor_db = config.audio.calibrated_noise_floor_db
+    if noise_floor_db is None:
+        noise_floor_db = config.dsp.silence_threshold_db
 
     from dsp.librosa_notes import detect_notes
-    print("Running note detection (basic-pitch neural network)...")
+    print("Running note detection (librosa pyin + onset)...")
     detected_notes = detect_notes(
         signal, sr,
         bpm=config.analysis.bpm,
         scale_notes=scale_notes,
         a4=config.reference_pitch_hz,
         latency_ms=latency_ms,
+        noise_floor_db=noise_floor_db,
     )
     print(f"  Detected {len(detected_notes)} notes")
 

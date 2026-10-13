@@ -13,6 +13,7 @@ class AudioConfig:
     device_index: Optional[int] = None  # None = system default
     dtype: str = "float32"
     latency_offset_ms: float = 0.0  # subtract from onset times to compensate USB/driver latency
+    calibrated_noise_floor_db: Optional[float] = None  # per-device noise floor from CalibrationModal
 
 
 @dataclass

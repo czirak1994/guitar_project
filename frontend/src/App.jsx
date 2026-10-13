@@ -910,6 +910,10 @@ export default function App() {
         formData.append('style', guitarStyle)
         formData.append('scale_or_key', scaleKey)
         formData.append('rhythm_info', rhythmInfo)
+        formData.append('latency_ms', timingCalibration?.avgOffsetMs ?? 0)
+        if (audioCalibration?.noiseFloorDb !== undefined && Number.isFinite(audioCalibration.noiseFloorDb)) {
+          formData.append('noise_floor_db', audioCalibration.noiseFloorDb)
+        }
 
         const { data } = await axios.post('/api/analyze', formData, {
           headers: authHeaders(jwt),
