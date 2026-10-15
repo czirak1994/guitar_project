@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import axios from 'axios'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/clerk-react'
 import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
@@ -577,6 +577,12 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
           </button>
         </div>
       )}
+
+      <div className="hero-footer-links">
+        <Link to="/privacy">Privacy</Link>
+        <span aria-hidden="true">·</span>
+        <Link to="/terms">Terms</Link>
+      </div>
     </div>
   )
 }

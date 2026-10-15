@@ -1016,6 +1016,23 @@ input[type="range"] {
 }
 .hero-ask-link:hover { color: var(--text-2); }
 
+.hero-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.74rem;
+  color: var(--text-4);
+}
+.hero-footer-links a {
+  color: var(--text-4);
+  text-decoration: none;
+}
+.hero-footer-links a:hover {
+  color: var(--text-3);
+  text-decoration: underline;
+}
+
 .hero-ask-row {
   display: flex;
   gap: 10px;
