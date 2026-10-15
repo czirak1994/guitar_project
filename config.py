@@ -55,7 +55,11 @@ class AIConfig:
     enabled: bool = os.getenv("GEMINI_API_KEY") is not None
     api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
     model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    max_tokens: int = 300
+    # Was 300 but never actually wired into the API call. Now that it's a
+    # real max_output_tokens cap, 300 is too tight for the structured JSON
+    # response (diagnosis + 2 lists + exercise + follow-up) and risks
+    # truncating it mid-object, which breaks JSON parsing and burns a retry.
+    max_tokens: int = 1024
 
 
 @dataclass

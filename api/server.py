@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import AppConfig
 from main import analyze_wav_file
-from database import db, User, GuestUser, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback, ChatMessage
+from database import db, User, GuestUser, Session, PerformanceMetric, AIFeedback, LearningState, DeveloperFeedback, ChatMessage, FREE_DAILY_LIMIT
 from auth import require_auth, optional_auth, get_client_ip
 from flask import g, make_response
 from payments import payments_bp
@@ -752,7 +752,7 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
 
         user = User.query.get(g.user_id)
         if not user:
-            return jsonify({"is_guest": False, "plan": "free", "remaining_today": 5, "daily_limit": 5})
+            return jsonify({"is_guest": False, "plan": "free", "remaining_today": FREE_DAILY_LIMIT, "daily_limit": FREE_DAILY_LIMIT})
 
         if user.plan == "pro":
             return jsonify({"is_guest": False, "plan": "pro", "remaining_today": None, "daily_limit": None})
@@ -762,8 +762,8 @@ def create_api(config: AppConfig, static_dir: str | None = None) -> Flask:
         return jsonify({
             "is_guest": False,
             "plan": user.plan,
-            "remaining_today": max(0, 5 - used),
-            "daily_limit": 5,
+            "remaining_today": max(0, FREE_DAILY_LIMIT - used),
+            "daily_limit": FREE_DAILY_LIMIT,
         })
 
     @app.route("/api/auth/migrate-guest", methods=["POST"])

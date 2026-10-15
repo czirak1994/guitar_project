@@ -3,6 +3,16 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
+FREE_DAILY_LIMIT = 5
+# "Unlimited" for PRO is marketed as no meaningful cap for real practice use,
+# but each analysis costs a Gemini API call — a hard-unbounded limit means a
+# scripted or compromised account could cost more than the $9.99/mo it pays.
+# This ceiling is far above anything a human recording guitar takes would
+# ever hit (even one take every ~5 min for 5 hours straight is ~60/day), so
+# it's a quiet abuse/cost safety net, not a real-world restriction.
+PRO_DAILY_LIMIT = 60
+
+
 class User(db.Model):
     __tablename__ = 'users'
     
@@ -27,9 +37,8 @@ class User(db.Model):
             self.usage_count = 0
             self.last_usage_date = today
 
-        if self.plan == "pro":
-            return True
-        return self.usage_count < 5
+        limit = PRO_DAILY_LIMIT if self.plan == "pro" else FREE_DAILY_LIMIT
+        return self.usage_count < limit
 
     def record_usage(self):
         self.usage_count += 1

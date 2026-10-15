@@ -4,7 +4,24 @@ import json
 import re
 import time
 from collections import Counter
+from typing import Optional
+from pydantic import BaseModel
 from config import AIConfig
+
+
+class CoachingResponse(BaseModel):
+    """Structured-output schema for the first-message coaching reply.
+
+    Passed as response_schema to Gemini so the model is constrained to this
+    exact shape at generation time, instead of just being asked nicely in the
+    prompt — this is what the frontend's chat card actually reads, and what
+    used to drift out of sync with free-text JSON formatting.
+    """
+    diagnosis: str
+    specific_issues: list[str]
+    actionable_fixes: list[str]
+    focused_exercise: Optional[str] = None
+    follow_up_question: Optional[str] = None
 
 
 class AICoach:
@@ -139,10 +156,10 @@ Audio: [attached]
 OUTPUT FORMAT (JSON):
 {{
   "diagnosis": "Short diagnosis (1–2 sentences)",
-  "specific_issues": ["Issue 1", "Issue 2"],
-  "actionable_fixes": ["Fix 1", "Fix 2"],
+  "specific_issues": ["Issue 1", "Issue 2 (max 3 items, one short sentence each)"],
+  "actionable_fixes": ["Fix 1", "Fix 2 (max 3 items, one short sentence each)"],
   "focused_exercise": "1 focused exercise or null",
-  "follow_up_question": "One question to continue the conversation"
+  "follow_up_question": "One short question to continue the conversation"
 }}
 
 Write all output in: {language}
@@ -437,6 +454,8 @@ IMPORTANT:
                         config=types.GenerateContentConfig(
                             system_instruction=self.SYSTEM_PROMPT,
                             response_mime_type="application/json",
+                            response_schema=CoachingResponse,
+                            max_output_tokens=self.config.max_tokens,
                         ),
                     )
                     
@@ -506,18 +525,21 @@ IMPORTANT:
 
         # Give a more informative summary based on reason
         if reason and "silent" in reason.lower():
-            summary = "No clear guitar signal detected — check your input level and try again."
+            diagnosis = "No clear guitar signal detected — check your input level and try again."
         elif reason and ("timed out" in reason.lower() or "rejected" in reason.lower()):
-            summary = "AI analysis could not process this take (audio too short or silent). Try a longer recording."
+            diagnosis = "AI analysis could not process this take (audio too short or silent). Try a longer recording."
         else:
-            summary = "AI coaching unavailable for this session. Your DSP metrics are still recorded."
+            diagnosis = "AI coaching is temporarily unavailable, but your timing/pitch metrics below are still accurate."
 
+        # Same schema as a real response (diagnosis/specific_issues/actionable_fixes/...) —
+        # the chat UI only renders these field names, so a fallback in the old
+        # schema used to render as a silent, empty card.
         payload = {
-            "summary": summary,
-            "detected_scale": "Not Detected",
-            "detected_rhythm": "Not Detected",
-            "musical_advice": "Ensure your guitar is audible in the recording. The AI needs a clear signal to analyse your playing.",
-            "technical_focus": tips[0] if tips else "Keep practicing with the metronome."
+            "diagnosis": diagnosis,
+            "specific_issues": [],
+            "actionable_fixes": tips,
+            "focused_exercise": None,
+            "follow_up_question": None,
         }
         if meta is None:
             meta = self._build_meta(
@@ -529,11 +551,11 @@ IMPORTANT:
 
     def _silence_fallback(self, report: dict) -> dict:
         return self._with_meta({
-            "summary": "No guitar signal was detected in this recording.",
-            "detected_scale": "N/A",
-            "detected_rhythm": "N/A",
-            "musical_advice": "Check your input volume and microphone connection. The AI needs to hear your playing clearly to analyze it.",
-            "technical_focus": "Check cable/input gain."
+            "diagnosis": "No guitar signal was detected in this recording.",
+            "specific_issues": [],
+            "actionable_fixes": ["Check your input volume and microphone connection, then try again."],
+            "focused_exercise": None,
+            "follow_up_question": None,
         }, self._build_meta(
             used_fallback=True,
             stage="silence",
@@ -584,6 +606,7 @@ IMPORTANT:
                 contents=[prompt],
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_PROMPT,
+                    max_output_tokens=self.config.max_tokens,
                 ),
             )
             return response.text.strip() if response.text else "I couldn't process that — please rephrase."
