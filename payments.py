@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify
 
 from database import db, User
 from auth import require_auth
+from analytics import track as track_event
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -113,6 +114,7 @@ def stripe_webhook():
                     user.stripe_customer_id = session.get("customer")
                 db.session.commit()
                 print(f"[Stripe] Upgraded user {user_id} to PRO, customer={user.stripe_customer_id}")
+                track_event(user_id, "subscription_started", {"plan": "pro"})
 
     elif event['type'] == 'customer.subscription.deleted':
         sub = event['data']['object']
@@ -123,5 +125,6 @@ def stripe_webhook():
                 user.plan = "free"
                 db.session.commit()
                 print(f"[Stripe] Downgraded user {user.user_id} to FREE (subscription cancelled)")
+                track_event(user.user_id, "subscription_cancelled")
 
     return jsonify(success=True)

@@ -57,6 +57,7 @@ function PrivacyPolicy() {
           <li><strong>Your guitar recordings.</strong> When you record a take for analysis, the audio is uploaded to our server and stored so you can play it back later and track your progress over time.</li>
           <li><strong>Practice data.</strong> Tempo, detected notes, timing and pitch-accuracy metrics, your stated practice goals/problems, and chat messages you send to the AI coach.</li>
           <li><strong>Guest usage data.</strong> If you use ToneSense without an account, we set an anonymous cookie and record your IP address to apply the free daily usage limit fairly.</li>
+          <li><strong>Product analytics.</strong> Through PostHog, we collect which pages/features you use, how you reached the app (e.g. which link or campaign), and funnel events like starting a recording or hitting a usage limit — not the contents of your recordings or chat messages.</li>
           <li><strong>Billing info.</strong> If you subscribe to the paid plan, payments are handled by Stripe. We do not see or store your full card number — we keep only your Stripe customer/subscription reference.</li>
         </ul>
       </section>
@@ -80,6 +81,7 @@ function PrivacyPolicy() {
           <li><strong>Clerk</strong> — authentication and account management.</li>
           <li><strong>Stripe</strong> — payment processing and subscription billing.</li>
           <li><strong>Google (Gemini API)</strong> — AI analysis of your recordings, as described above.</li>
+          <li><strong>PostHog</strong> — product analytics (which pages and features get used, where visitors come from) so we know what to fix and build next. It doesn't see your recordings.</li>
           <li><strong>Our hosting provider</strong> — to run the servers and store data; they process data on our behalf and don't use it for their own purposes.</li>
         </ul>
         <p>We do not sell your personal data.</p>
@@ -98,12 +100,15 @@ function PrivacyPolicy() {
       </section>
 
       <section className="legal-section">
-        <h2>6. Cookies</h2>
+        <h2>6. Cookies and similar storage</h2>
         <p>
-          We use a small number of strictly functional cookies: a session
-          cookie from Clerk (if you're signed in) and an anonymous guest-ID
-          cookie used only to apply the free daily usage limit fairly. We
-          don't use advertising or cross-site tracking cookies.
+          We use a small number of functional cookies: a session cookie from
+          Clerk (if you're signed in) and an anonymous guest-ID cookie used
+          only to apply the free daily usage limit fairly. PostHog, our
+          analytics provider, also sets a cookie/local-storage identifier to
+          recognize repeat visits and measure how people move through the
+          app. We don't use advertising or cross-site tracking cookies, and
+          we don't sell or share this data with ad networks.
         </p>
       </section>
 

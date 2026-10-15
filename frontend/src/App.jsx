@@ -5,6 +5,7 @@ import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton, useAuth } 
 import { LatestStatsWidget, YoutubeWidget, PaywallModal, OnboardingModal, ConversationalChat, GuestLimitModal, SectionTooltip, MicrophoneSetupModal, AIChatBubble, DemoFeedbackModal } from './components/AppPanels'
 import { loadCalibration, saveInputCalibration, saveTimingCalibration } from './utils/calibrate'
 import CalibrationModal from './components/CalibrationModal'
+import { identifyUser, track } from './utils/analytics'
 import './App.css'
 
 // Send cookies (anon_token) on every request
@@ -21,7 +22,7 @@ const CLERK_ENABLED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 // Safe wrapper around useAuth — returns nulls when Clerk is not configured.
 function useSafeAuth() {
   if (!CLERK_ENABLED) {
-    return { getToken: async () => null, isLoaded: true, isSignedIn: false }
+    return { getToken: async () => null, isLoaded: true, isSignedIn: false, userId: null }
   }
   // eslint-disable-next-line react-hooks/rules-of-hooks
   return useAuth()
@@ -590,12 +591,19 @@ function HeroScreen({ phase, elapsed, pendingAudio, onRecord, onDiscardAudio, on
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [demoOpen, setDemoOpen] = useState(false)
-  const { getToken, isLoaded, isSignedIn } = useSafeAuth()
+  const { getToken, isLoaded, isSignedIn, userId } = useSafeAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [bpm, setBpm] = useState(120)
   const [metroVolume, setMetroVolume] = useState(0.5)
   const [backingVolume, setBackingVolume] = useState(0.5)
+
+  // Link this browser's analytics history to the signed-in user as soon as
+  // we know who they are — merges prior anonymous (guest) events with their
+  // identified profile, so the guest→signup funnel is measurable.
+  useEffect(() => {
+    if (isSignedIn && userId) identifyUser(userId)
+  }, [isSignedIn, userId])
 
   // Detect Stripe redirect params — params live in the hash with HashRouter
   const stripeParams = new URLSearchParams(location.search)
@@ -605,6 +613,7 @@ export default function App() {
   )
   useEffect(() => {
     if (stripeNotice) {
+      track(stripeNotice === 'success' ? 'checkout_return_success' : 'checkout_abandoned')
       navigate('/', { replace: true })
       const t = setTimeout(() => setStripeNotice(null), 6000)
       return () => clearTimeout(t)
@@ -792,6 +801,7 @@ export default function App() {
       processor.connect(audioCtx.destination)
       
       setPhase('recording')
+      track('record_started')
       if (backingTrack && playerRef.current) {
           playerRef.current.seekTo(0);
           playerRef.current.playVideo();
@@ -820,6 +830,7 @@ export default function App() {
             const wavUrl = URL.createObjectURL(wavBlob)
 
             setPendingAudio({ blob: wavBlob, url: wavUrl, duration: allSamples.length / audioCtx.sampleRate })
+            track('recording_completed', { duration_s: allSamples.length / audioCtx.sampleRate })
             setPhase('review')
             inFlightRef.current = false
             audioCtx.close().catch(()=>{})
@@ -834,6 +845,7 @@ export default function App() {
         if (Date.now() - startedAt > AI_POLL_TIMEOUT_MS) {
           clearInterval(timer)
           inFlightRef.current = false
+          track('analysis_failed', { reason: 'timeout' })
           setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
             ...m, status: 'error', text: 'AI analysis timed out. Please try again.',
           } : m))
@@ -863,7 +875,12 @@ export default function App() {
               setHasEverRecorded(true)
               localStorage.setItem('ts_has_recorded', '1')
             }
+            track('analysis_succeeded', {
+              note_count: (noteData.detected_notes || data.detected_notes || []).length,
+              duration_s: data.duration_s || noteData.duration_s || 0,
+            })
           } else {
+            track('analysis_failed', { reason: 'ai_failed' })
             setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
               ...m, status: 'error', text: 'AI analysis failed. Please try again.',
             } : m))
@@ -921,6 +938,7 @@ export default function App() {
           formData.append('noise_floor_db', audioCalibration.noiseFloorDb)
         }
 
+        track('analysis_submitted')
         const { data } = await axios.post('/api/analyze', formData, {
           headers: authHeaders(jwt),
         })
@@ -985,13 +1003,16 @@ export default function App() {
     } catch (e) {
       const errCode = e.response?.data?.error
       if (e.response?.status === 403 && errCode === 'GUEST_LIMIT_REACHED') {
+        if (audioBlob) track('guest_limit_reached')
         setUsage(u => ({ ...(u || {}), remaining_today: 0 }))
         setPhase('guest_limit')
         setChatMessages(prev => prev.filter(m => m.id !== aiMsgId))
       } else if (e.response?.status === 403 && errCode === 'LIMIT_REACHED') {
+        if (audioBlob) track('daily_limit_reached')
         setPhase('paywall')
         setChatMessages(prev => prev.filter(m => m.id !== aiMsgId))
       } else {
+        if (audioBlob) track('analysis_failed', { reason: errCode || 'request_error' })
         setChatMessages(prev => prev.map(m => m.id === aiMsgId ? {
           ...m, status: 'error', text: e.response?.data?.error || 'Something went wrong. Please try again.',
         } : m))
@@ -1068,6 +1089,7 @@ export default function App() {
                 <button
                   className="upgrade-btn"
                   onClick={async () => {
+                    track('upgrade_clicked', { source: 'header' })
                     try {
                       const jwt = await getToken()
                       const { data } = await axios.post('/api/create-checkout-session', {}, { headers: authHeaders(jwt) })
@@ -1120,7 +1142,7 @@ export default function App() {
                 onSend={handleChatSend}
                 chatMessages={chatMessages}
                 isFirstVisit={true}
-                onShowDemo={() => setDemoOpen(true)}
+                onShowDemo={() => { track('demo_feedback_viewed'); setDemoOpen(true) }}
               />
             ) : (
               /* ── RETURNING: Full layout with collapsible panel ── */

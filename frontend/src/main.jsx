@@ -3,15 +3,20 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import App from './App.jsx'
 import ProfilePage from './ProfilePage.jsx'
 import LegalPage from './LegalPage.jsx'
+import RouteTracker from './RouteTracker.jsx'
+import { initAnalytics } from './utils/analytics'
 import './index.css'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 import { createRoot } from 'react-dom/client'
 
+initAnalytics()
+
 // Tree of routes — works with or without Clerk
 const AppTree = (
   <HashRouter>
+    <RouteTracker />
     <Routes>
       <Route path="/" element={<App />} />
       <Route path="/profile" element={<ProfilePage />} />

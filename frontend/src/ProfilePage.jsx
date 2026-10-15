@@ -2,12 +2,19 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, UserButton } from '@clerk/clerk-react'
 import axios from 'axios'
+import { identifyUser, track } from './utils/analytics'
 import './App.css'
 import './ProfilePage.css'
 
 export default function ProfilePage() {
-  const { getToken, isLoaded, isSignedIn } = useAuth()
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth()
   const navigate = useNavigate()
+
+  // Covers landing directly on /profile (e.g. a bookmark) without App.jsx
+  // ever mounting to run its own identify call first.
+  useEffect(() => {
+    if (isSignedIn && userId) identifyUser(userId)
+  }, [isSignedIn, userId])
 
   const [profile, setProfile] = useState(null)
   const [stats, setStats] = useState(null)
@@ -87,6 +94,7 @@ export default function ProfilePage() {
   }
 
   const handleUpgrade = async () => {
+    track('upgrade_clicked', { source: 'profile' })
     setUpgradeLoading(true)
     try {
       const jwt = await getToken()
