@@ -44,15 +44,35 @@ _COOKIE_MAX_AGE = 60 * 60 * 24 * 365  # 1 year
 def _get_or_create_guest() -> GuestUser:
     """Lookup or create a GuestUser based on g.guest_id (set by optional_auth)."""
     guest = GuestUser.query.get(g.guest_id)
-    if not guest:
-        guest = GuestUser(
-            anon_token=g.guest_id,
-            ip_address=get_client_ip(),
-            usage_count=0,
-            last_usage_date=datetime.date.today(),
-        )
-        db.session.add(guest)
-        db.session.commit()
+    if guest:
+        return guest
+
+    # No record for this anon_token — either a first-ever visit, or the
+    # client simply didn't send its cookie. Before handing out a fresh daily
+    # allowance, check whether this IP already has a guest record from
+    # today: if so, reuse it instead of letting a dropped/cleared cookie
+    # reset the limit. Best-effort (shared IPs exist) but closes the trivial
+    # "don't send cookies" bypass of the guest daily cap.
+    ip = get_client_ip()
+    today = datetime.date.today()
+    if ip and ip != "unknown":
+        existing = (GuestUser.query
+                    .filter_by(ip_address=ip)
+                    .order_by(GuestUser.created_at.desc())
+                    .first())
+        if existing and existing.last_usage_date == today:
+            g.guest_id = existing.anon_token
+            g.is_new_guest = True  # re-issue the cookie so this IP can go back to the fast cookie path
+            return existing
+
+    guest = GuestUser(
+        anon_token=g.guest_id,
+        ip_address=ip,
+        usage_count=0,
+        last_usage_date=today,
+    )
+    db.session.add(guest)
+    db.session.commit()
     return guest
 
 

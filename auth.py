@@ -1,9 +1,10 @@
 import os
 import uuid
-import jwt
 from functools import wraps
+from typing import Optional
 from flask import request, jsonify, g
 from clerk_backend_api import Clerk
+from clerk_backend_api.security.types import AuthenticateRequestOptions
 
 # Initialize Clerk SDK
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
@@ -18,52 +19,54 @@ def get_client_ip():
     return request.remote_addr or "unknown"
 
 
+def _verify_session_token() -> Optional[str]:
+    """Verify the current request's Clerk session token and return its user_id.
+
+    Uses clerk_backend_api's authenticate_request(), which checks the token's
+    RS256 signature against Clerk's JWKS (and expiry/issued-at) — unlike a
+    bare jwt.decode(verify_signature=False), this cannot be fooled by a
+    forged token carrying someone else's user_id. Returns None if the
+    request has no valid, signed session token.
+    """
+    if not clerk_client:
+        return None
+
+    request_state = clerk_client.authenticate_request(
+        request,
+        AuthenticateRequestOptions(secret_key=CLERK_SECRET_KEY),
+    )
+    if not request_state.is_signed_in or not request_state.payload:
+        return None
+    return request_state.payload.get("sub")
+
+
 def require_auth(f):
     """
     Middleware to protect Flask routes.
-    Verifies the Clerk JWT token sent in the Authorization header.
+    Verifies the Clerk session token's signature via Clerk's JWKS.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
         if not clerk_client:
             return jsonify({"error": "Clerk Auth is not configured on server"}), 500
 
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return jsonify({"error": "Missing or invalid Authorization header"}), 401
-
-        token = auth_header.split(" ")[1]
-
         try:
-            # We verify the token payload. 
-            # The clerk_backend_api package does not have a simple verify_token method that takes just a string
-            # without additional request context, so we decode it. 
-            # In a robust production environment, you would verify the signature against Clerk's JWKS.
-            unverified_claims = jwt.decode(token, options={"verify_signature": False})
-            user_id = unverified_claims.get("sub")
-            
-            if not user_id:
-                raise ValueError("Invalid token payload: missing sub")
-
-            # Validate that the user actually exists natively via Clerk API to prevent spoofing
-            # This is 100% secure as it hits Clerk's backend directly using the Secret Key.
-            user = clerk_client.users.get(user_id=user_id)
-            if not user:
-                raise ValueError("User not found in Clerk")
-            
-            g.user_id = user_id
-
+            user_id = _verify_session_token()
         except Exception as e:
             print(f"[Auth Error] {e}")
+            user_id = None
+
+        if not user_id:
             return jsonify({"error": "Unauthorized"}), 401
 
+        g.user_id = user_id
         return f(*args, **kwargs)
     return decorated
 
 
 def optional_auth(f):
     """Allows both authenticated (Clerk JWT) and anonymous (cookie) users.
-    
+
     Sets on flask.g:
       - g.user_id   (str | None)  — Clerk user ID if authenticated
       - g.guest_id  (str | None)  — anon_token UUID if guest
@@ -77,21 +80,15 @@ def optional_auth(f):
         g.is_guest = True
         g.is_new_guest = False
 
-        auth_header = request.headers.get("Authorization")
+        try:
+            user_id = _verify_session_token()
+        except Exception as e:
+            print(f"[OptionalAuth] token verification failed, falling through to guest: {e}")
+            user_id = None
 
-        # Try Clerk JWT first
-        if auth_header and auth_header.startswith("Bearer ") and clerk_client:
-            token = auth_header.split(" ")[1]
-            try:
-                unverified_claims = jwt.decode(token, options={"verify_signature": False})
-                user_id = unverified_claims.get("sub")
-                if user_id:
-                    user = clerk_client.users.get(user_id=user_id)
-                    if user:
-                        g.user_id = user_id
-                        g.is_guest = False
-            except Exception as e:
-                print(f"[OptionalAuth] JWT failed, falling through to guest: {e}")
+        if user_id:
+            g.user_id = user_id
+            g.is_guest = False
 
         # Guest mode: use anon_token cookie
         if g.is_guest:
